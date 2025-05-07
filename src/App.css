@@ -1,0 +1,78 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --font-size-base: 16px;
+  --font-size-heading: 20px;
+  --training-color: #1e40af; /* Tailwind blue-800 */
+  --training-dark-color: #1e3a8a; /* Tailwind blue-900 */
+  --wealth-color: #a21caf; /* Tailwind purple-800 */
+  --wealth-dark-color: #86198f; /* Tailwind purple-900 */
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+.bg-training {
+  background-color: var(--training-color);
+}
+
+.hover\:bg-training-dark:hover {
+  background-color: var(--training-dark-color);
+}
+
+.bg-wealth {
+  background-color: var(--wealth-color);
+}
+
+.hover\:bg-wealth-dark:hover {
+  background-color: var(--wealth-dark-color);
+}
+
+.bg-success-light {
+  background-color: rgba(34, 197, 94, 0.1);
+}
+
+.text-success-dark {
+  color: rgb(22, 163, 74);
+}
+
+.border-success {
+  border-color: rgb(22, 163, 74);
+}
+
+.bg-info-light {
+  background-color: rgba(6, 182, 212, 0.1);
+}
+
+.text-info-dark {
+  color: rgb(8, 145, 178);
+}
+
+.border-info {
+  border-color: rgb(6, 182, 212);
+}
+
+.bg-warning-light {
+  background-color: rgba(245, 158, 11, 0.1);
+}
+
+.text-warning-dark {
+  color: rgb(217, 119, 6);
+}
+
+.border-warning {
+  border-color: rgb(245, 158, 11);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-size: var(--font-size-heading);
+}
+
+/* Style for scrollable dialog content */
+[role="dialog"] [data-state="open"] > div {
+  max-height: 80vh; /* Adjust as needed */
+  overflow-y: auto;
+}
+
