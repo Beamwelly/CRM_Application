@@ -11,8 +11,8 @@ import { Customer, RenewalHistory } from '@/types'; // Assuming types are in src
 const getAllCustomers = async (developerAdminFilterId?: string | null): Promise<Customer[]> => {
   try {
     const endpoint = developerAdminFilterId 
-      ? `/customers?adminId=${developerAdminFilterId}` 
-      : '/customers';
+      ? `/api/customers?adminId=${developerAdminFilterId}` 
+      : '/api/customers';
     console.log(`[Frontend customerService] Calling getAllCustomers with endpoint: ${endpoint}`);
     const customers = await api.get(endpoint); // Use the api helper
     return customers as Customer[]; // Add type assertion if needed
@@ -33,7 +33,7 @@ const getAllCustomers = async (developerAdminFilterId?: string | null): Promise<
 const createCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt' | 'followUps' | 'renewalHistory' | 'communicationHistory'>): Promise<Customer> => {
   try {
     console.log('Creating customer with data:', customerData); // Debug log
-    const response = await api.post('/customers', customerData);
+    const response = await api.post('/api/customers', customerData);
     console.log('Customer creation response:', response); // Debug log
     
     if (!response) {
@@ -56,7 +56,7 @@ const createCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt' | 
  */
 const updateCustomer = async (customerId: string | number, updateData: Partial<Omit<Customer, 'id' | 'createdAt' | 'followUps' | 'renewalHistory' | 'communicationHistory'>>): Promise<Customer> => {
   try {
-    const updatedCustomer = await api.put(`/customers/${customerId}`, updateData);
+    const updatedCustomer = await api.put(`/api/customers/${customerId}`, updateData);
     // Handle potential null return from api.put if backend returns 204
     // If backend *always* returns the updated customer, this check isn't strictly needed
     if (updatedCustomer === null) {
@@ -83,7 +83,7 @@ const updateCustomer = async (customerId: string | number, updateData: Partial<O
  */
 const deleteCustomer = async (customerId: string | number): Promise<void> => {
   try {
-    await api.delete(`/customers/${customerId}`); // Use api helper, expects 204 on success
+    await api.delete(`/api/customers/${customerId}`); // Use api helper, expects 204 on success
   } catch (error) {
     console.error(`Failed to delete customer ${customerId} via API:`, error);
     // Re-throw or handle error appropriately for the UI
@@ -98,7 +98,7 @@ const deleteCustomer = async (customerId: string | number): Promise<void> => {
  */
 const clearAllCustomers = async (): Promise<void> => {
   try {
-    await api.delete(`/admin/clear-data/customers`);
+    await api.delete(`/api/admin/clear-data/customers`);
   } catch (error) {
     console.error(`Failed to clear all customers via API:`, error);
     throw error;
@@ -119,7 +119,7 @@ const addRenewalHistory = async (
   try {
     // Send the relevant data. Ensure date formats match backend expectation if sending dates.
     // The backend route uses NOW() for the entry date, so we send amount, status, notes, nextRenewalDate.
-    const newRenewal = await api.post(`/customers/${customerId}/renewal-history`, renewalEntry);
+    const newRenewal = await api.post(`/api/customers/${customerId}/renewal-history`, renewalEntry);
     return newRenewal as RenewalHistory;
   } catch (error) {
     console.error(`Failed to add renewal history for customer ${customerId} via API:`, error);

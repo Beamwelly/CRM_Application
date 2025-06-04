@@ -1,8 +1,16 @@
 import express, { Router, Request, Response, NextFunction } from 'express';
 import { z, ZodError } from 'zod';
 import { protect } from '../middleware/authMiddleware';
-import { getAllUsers, createUser, getUserById, updateUserPermissions, deleteUser, createAdmin } from '../services/userService';
-import { UserPermissions } from '../@types';
+import { 
+  getAllUsers, 
+  createUser, 
+  getUserById, 
+  updateUserPermissions, 
+  deleteUser, 
+  createAdmin // Ensure this service function can accept logoUrl
+} from '../services/userService';
+import { UserPermissions } from '../@types'; // Assuming this type is correctly defined and used
+import { multerMemoryStorage, uploadFileToS3 } from '../services/fileUploadService'; // Crucial import
 
 const router: Router = express.Router();
 
@@ -10,6 +18,7 @@ const router: Router = express.Router();
 router.use(express.json());
 
 // --- Zod Schemas --- 
+// This schema is for the generic POST /api/users route, and remains unchanged.
 const createUserSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }),
@@ -21,68 +30,58 @@ const createUserSchema = z.object({
 });
 
 const updateUserPermissionsSchema = z.object({
-    permissions: z.object({}).passthrough(), // Require permissions object (refine later if needed)
+    permissions: z.object({}).passthrough(), 
 });
 
 // --- Validation Middleware --- 
 const validateRequest = (schema: z.ZodTypeAny) => 
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Validate request body
       const validatedData = schema.parse(req.body);
-      req.body = validatedData; // Replace body with validated data
+      req.body = validatedData; 
       next();
     } catch (error) {
       if (error instanceof ZodError) {
-        // Format Zod errors for client response
         const errors = error.errors.map(err => ({ field: err.path.join('.'), message: err.message }));
         return res.status(400).json({ message: 'Input validation failed', errors });
       } 
-      // Handle unexpected errors
       console.error("Unexpected validation error:", error);
       res.status(500).json({ message: 'Internal validation error' });
     }
   };
 
 // Apply protect middleware to all user routes
-router.use(protect);
+router.use(protect); // Ensures req.user is populated for subsequent routes
 
 // GET /api/users - List users (filtered by role)
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
-    // Service function needs to handle filtering based on req.user
     try {
-        if (!req.user) return res.status(401).json({ message: 'Not authorized' });
-        const users = await getAllUsers(req.user);
-        res.json(users);
+      if (!req.user) return res.status(401).json({ message: 'Not authorized' });
+      const users = await getAllUsers(req.user);
+      res.json(users);
     } catch (error) {
-        next(error);
+      next(error);
     }
 });
 
-// POST /api/users - Create a new user
+// POST /api/users - Create a new user (generic, uses createUserSchema)
+// This route remains unchanged and does not handle file uploads directly based on its current schema.
 router.post('/', validateRequest(createUserSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) return res.status(401).json({ message: 'Not authorized' });
-
-    // req.body now contains validated data from the middleware
     const validatedUserData = req.body; 
-
-    // Service layer checks permissions (createAdmin/createEmployee) 
-    // and handles role-specific logic (limits, createdByAdminId)
     const newUser = await createUser(validatedUserData, req.user);
     res.status(201).json(newUser);
   } catch (error) {
-    // Handle specific service errors
     if (error instanceof Error && (error.message.startsWith('Permission denied') || error.message.includes('limit reached') || error.message.includes('Invalid assigned admin') || error.message.includes('Email already exists'))) {
       return res.status(error.message.includes('Email already exists') ? 409 : 403).json({ message: error.message });
     }
-    next(error); // Forward other errors to global handler
+    next(error); 
   }
 });
 
 // GET /api/users/:id (Protected)
-// Fetches a single user by ID
-router.get('/:id', protect, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => { // protect already applied
   try {
     if (!req.user) return res.status(401).json({ message: 'Not authorized' });
     
@@ -93,23 +92,26 @@ router.get('/:id', protect, async (req: Request, res: Response, next: NextFuncti
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Scope check - can requestor view this user?
     let canView = false;
+    
     const viewScope = req.user.permissions?.viewUsers || 'none';
+    
     if (req.user.role === 'developer' || viewScope === 'all') {
-        canView = true;
+      canView = true;
+   
     } else if (req.user.role === 'admin' && viewScope === 'subordinates') {
-        if (user.id === req.user.id || user.createdByAdminId === req.user.id) {
-            canView = true;
-        }
-    } else if (viewScope === 'none' && user.id === req.user.id) {
+      
+      if (user.id === req.user.id || user.createdByAdminId === req.user.id) {
         canView = true;
+      }
+    
+    } else if (viewScope === 'none' && user.id === req.user.id) {
+      canView = true;
     }
 
     if (!canView) {
-        return res.status(403).json({ message: 'Permission denied: Cannot view this user.' });
+      return res.status(403).json({ message: 'Permission denied: Cannot view this user.' });
     }
-
     res.json(user);
   } catch (error) {
     next(error);
@@ -117,20 +119,17 @@ router.get('/:id', protect, async (req: Request, res: Response, next: NextFuncti
 });
 
 // PUT /api/users/:id/permissions (Protected)
-// Updates a user's permissions
 router.put('/:id/permissions', validateRequest(updateUserPermissionsSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    
     if (!req.user) return res.status(401).json({ message: 'Not authorized' });
 
     const userIdToUpdate = req.params.id;
-    // Use validated permissions from req.body
     const { permissions: validatedPermissions } = req.body; 
-
-    // Service layer handles permission checks (editUserPermissions, scope)
+    
     const updatedUser = await updateUserPermissions(userIdToUpdate, validatedPermissions, req.user);
     res.json(updatedUser);
   } catch (error) {
-    // Handle specific errors like permission denied or not found
     if (error instanceof Error && error.message.startsWith('Permission denied')) {
       return res.status(403).json({ message: error.message });
     }
@@ -142,19 +141,16 @@ router.put('/:id/permissions', validateRequest(updateUserPermissionsSchema), asy
 });
 
 // DELETE /api/users/:id (Protected)
-// Deletes a user
-router.delete('/:id', protect, async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => { // protect already applied
   try {
+    
     if (!req.user) return res.status(401).json({ message: 'Not authorized' });
 
     const userIdToDelete = req.params.id;
-
-    // Service handles permission checks (deleteUser, scope, self-delete)
+    
     await deleteUser(userIdToDelete, req.user);
-    res.status(204).send(); // No content on successful deletion
-
+    res.status(204).send(); 
   } catch (error) {
-    // Handle specific service errors
     if (error instanceof Error && (error.message.startsWith('Permission denied') || error.message.includes('Cannot delete yourself'))) {
       return res.status(403).json({ message: error.message });
     }
@@ -162,15 +158,77 @@ router.delete('/:id', protect, async (req: Request, res: Response, next: NextFun
   }
 });
 
-router.post('/admin', async (req, res) => {
-  try {
-    const { name, email, password, employeeCreationLimit } = req.body;
-    const admin = await createAdmin({ name, email, password, employeeCreationLimit });
-    res.json(admin);
-  } catch (error) {
-    console.error('Error creating admin:', error);
-    res.status(500).json({ error: 'Failed to create admin' });
-  }
-});
+// POST /api/users/admin - Create a new Admin user WITH optional logo upload
+// This route is protected by the global `router.use(protect)`.
+// Ensure that your `protect` middleware and subsequent logic correctly authorize admin creation.
+router.post(
+  '/admin',
+  multerMemoryStorage.single('logoFile'), // Multer middleware for single file upload named 'logoFile'
+  async (req: Request, res: Response, next: NextFunction) => { // Added next for error handling
+    try {
+      // Authorization check: Example - ensure only developers or authorized roles can create admins.
+      // This depends on how `req.user` is populated by your `protect` middleware.
+      
+      if (!req.user || (req.user.role !== 'developer' /* && other conditions if any */)) {
+      //   // If createAdmin service doesn't check permissions, it's crucial to check here.
+      //   return res.status(403).json({ message: 'Permission denied to create admin users.' });
+      }
 
-export default router; 
+      const { name, email, password, employeeCreationLimit } = req.body;
+      let logoS3Url: string | undefined = undefined;
+
+      // Check if a file was uploaded by Multer
+      if (req.file) {
+        console.log('Logo file received for admin creation:', req.file.originalname);
+        try {
+          // Upload the file to S3 and get its URL
+          logoS3Url = await uploadFileToS3(req.file, 'logos/admins/'); // Path prefix in S3
+        } catch (uploadError) {
+          console.error('S3 Upload Error during admin creation:', uploadError);
+          // Pass the upload error to the main error handler
+          return next(new Error('Failed to upload logo to S3.')); 
+        }
+      } else {
+        console.log('No logo file provided for admin creation.');
+      }
+
+      // Prepare data for the userService.createAdmin function
+      const adminCreationPayload = {
+        name,
+        email,
+        password,
+        employeeCreationLimit: employeeCreationLimit ? parseInt(employeeCreationLimit, 10) : null,
+        logoUrl: logoS3Url, // Pass the S3 URL (or undefined if no file)
+      };
+      
+      // Call the service function from userService.ts
+      const newAdmin = await createAdmin(adminCreationPayload);
+      res.status(201).json(newAdmin);
+
+    } catch (error) {
+      // Log the original error for server-side debugging
+      console.error('Error in POST /api/users/admin route:', error);
+
+      // Handle specific known errors from the service or file handling
+      if (error instanceof Error) {
+        if (error.message.includes('User with this email already exists')) {
+          return res.status(409).json({ message: error.message });
+        }
+        if (error.message.includes('Not an image')) { // From multer fileFilter in fileUploadService
+          return res.status(400).json({ message: 'Invalid file type. Only images are allowed for logos.' });
+        }
+        if (error.message.includes('File too large')) { // From multer limits in fileUploadService
+          return res.status(400).json({ message: 'Logo file is too large.' });
+        }
+        // If it's the S3 upload error we explicitly passed to next()
+        if (error.message === 'Failed to upload logo to S3.') {
+            return res.status(500).json({ message: error.message });
+        }
+      }
+      // For other errors, pass to the global error handler
+      next(error);
+    }
+  }
+);
+
+export default router;

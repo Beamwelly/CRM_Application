@@ -1,6 +1,6 @@
 import express, { Router, Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
-import { addFollowUp, deleteFollowUp } from '../services/followUpService';
+import { z, ZodError } from 'zod';
+import { addFollowUp, deleteFollowUp, updateFollowUp } from '../services/followUpService';
 import { protect } from '../middleware/authMiddleware';
 
 const router: Router = express.Router();
@@ -10,16 +10,16 @@ router.use(express.json());
 
 // --- Zod Schema for Follow-up Creation ---
 const followUpSchema = z.object({
-  notes: z.string().min(1, { message: 'Notes cannot be empty' }),
-  nextCallDate: z.string().datetime({ message: 'Invalid date format for next call date' }), // Expect ISO string
-  leadId: z.string().uuid({ message: 'Invalid Lead ID' }).optional(),
-  customerId: z.string().uuid({ message: 'Invalid Customer ID' }).optional(),
+  notes: z.string().min(1, 'Notes are required'),
+  nextCallDate: z.string().refine((date) => !isNaN(Date.parse(date)), { message: "Invalid date format for next call date" }),
+  leadId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
 }).refine(data => data.leadId || data.customerId, {
-  message: "Must provide either leadId or customerId",
-  path: ["leadId", "customerId"], // Indicate which fields this refinement relates to
+  message: "Either leadId or customerId must be provided",
+  path: ["leadId", "customerId"],
 }).refine(data => !(data.leadId && data.customerId), {
-    message: "Cannot provide both leadId and customerId",
-    path: ["leadId", "customerId"],
+  message: "Cannot provide both leadId and customerId",
+  path: ["leadId", "customerId"],
 });
 
 // Middleware for validation (can be shared)
@@ -90,6 +90,45 @@ router.delete('/:followUpId', protect, async (req: Request, res: Response, next:
         return res.status(403).json({ message: error.message });
       }
       if (error.message === 'Follow-up not found') { // If service throws this
+        return res.status(404).json({ message: error.message });
+      }
+      // Other errors from the service
+      return res.status(500).json({ message: error.message }); 
+    }
+    next(error); // Pass non-Error objects to the global handler
+  }
+});
+
+// PUT /api/follow-ups/:followUpId (Protected Route)
+router.put('/:followUpId', protect, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    const { followUpId } = req.params;
+    if (!followUpId || typeof followUpId !== 'string') {
+      return res.status(400).json({ message: 'Invalid FollowUp ID format' });
+    }
+
+    const updateData = req.body;
+    if (!updateData || typeof updateData !== 'object') {
+      return res.status(400).json({ message: 'Invalid update data' });
+    }
+
+    // Validate the update data
+    if (updateData.nextCallDate && isNaN(Date.parse(updateData.nextCallDate))) {
+      return res.status(400).json({ message: 'Invalid date format for next call date' });
+    }
+
+    const updatedFollowUp = await updateFollowUp(followUpId, updateData, req.user);
+    res.status(200).json(updatedFollowUp);
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message.startsWith('Permission denied')) {
+        return res.status(403).json({ message: error.message });
+      }
+      if (error.message === 'Follow-up not found') {
         return res.status(404).json({ message: error.message });
       }
       // Other errors from the service

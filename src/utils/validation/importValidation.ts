@@ -50,7 +50,7 @@ export const validateLeadData = (data: ParsedRow[]): string[] => {
     errors.push(`Missing required columns: ${missingFields.join(", ")}`);
   }
   
-  const validServiceTypes = ["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"];
+  const validServiceTypes = ["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"];
 
   data.forEach((row, index) => {
     if (!row.name || !row.email || !row.mobile || !row.city || !row.serviceType) {
@@ -89,7 +89,7 @@ export const validateCustomerData = (data: ParsedRow[]): string[] => {
     errors.push(`Missing required columns: ${missingFields.join(", ")}`);
   }
   
-  const validServiceTypes = ["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"];
+  const validServiceTypes = ["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"];
 
   data.forEach((row, index) => {
     if (!row.name || !row.email || !row.mobile || !row.city || !row.serviceType || !row.startDate) {

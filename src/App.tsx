@@ -8,6 +8,7 @@ import Leads from './pages/Leads';
 import Customers from './pages/Customers';
 import FollowUps from './pages/FollowUps';
 import Renewals from './pages/Renewals';
+import RemarksPage from './pages/Remarks';
 // import Team from './pages/Team'; // Keep import commented/removed
 import NotFound from './pages/NotFound';
 import { UserManagementPage } from './pages/UserManagementPage'; // Import UserManagementPage
@@ -15,6 +16,7 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { AddAdminPage } from './pages/AddAdminPage'; // Import AddAdminPage
 import { AddEmployeePage } from './pages/AddEmployeePage'; // Import AddEmployeePage
 import EmailHistoryPage from './pages/EmailHistoryPage'; // Import the new page
+import { SettingsPage } from './pages/SettingsPage';
 
 function App() {
   return (
@@ -57,6 +59,18 @@ function App() {
           <Route path="/renewals" element={
             <ProtectedRoute>
               <Renewals />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/remarks" element={
+            <ProtectedRoute>
+              <RemarksPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/settings" element={
+            <ProtectedRoute>
+              <SettingsPage />
             </ProtectedRoute>
           } />
 

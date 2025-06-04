@@ -38,7 +38,7 @@ const formSchema = z.object({
   city: z.string().min(1, 'City is required'),
   serviceTypes: z.array(z.enum(["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"] as const)).min(1, "At least one service type is required"),
   startDate: z.date(),
-  assignedTo: z.string().min(1, 'Assignment is required'),
+  assignedTo: z.string().optional(),
   dob: z.date().optional(),
   address: z.string().optional(),
   paymentType: z.enum(['full_payment', 'partial_payment']).optional(),
@@ -57,22 +57,33 @@ const formSchema = z.object({
 type FormValues = z.infer<typeof formSchema>;
 
 export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
-  const { addCustomer, users, currentUser } = useCRM();
+  const { addCustomer, users, currentUser, isLoadingUsers } = useCRM();
   const { toast } = useToast();
 
   // Get available roles based on current user
   const availableUsers = React.useMemo(() => {
-    if (!currentUser) return [];
+    console.log("Calculating available users. Current user:", currentUser);
+    console.log("All users:", users);
+    
+    if (!currentUser || !users) {
+      console.log("No current user or users array is empty");
+      return [];
+    }
+    
+    let filteredUsers: User[] = [];
     
     if (currentUser.role === 'developer' || currentUser.role === 'admin') {
-      return users.filter(u => u.role === 'employee');
+      // Show all users except developers for admin/developer
+      filteredUsers = users.filter(u => u.role !== 'developer');
+    } else if (currentUser.role === 'employee') {
+      // For employees, show only themselves if they have assignCustomers permission
+      if (currentUser.permissions?.assignCustomers) {
+        filteredUsers = [currentUser];
+      }
     }
     
-    if (currentUser.role === 'employee') {
-      return [currentUser];
-    }
-    
-    return [];
+    console.log("Filtered users:", filteredUsers);
+    return filteredUsers;
   }, [users, currentUser]);
 
   const form = useForm<FormValues>({
@@ -84,7 +95,7 @@ export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
       city: "",
       serviceTypes: ["training"],
       startDate: new Date(),
-      assignedTo: currentUser?.id || "",
+      assignedTo: currentUser?.id || "", // Default to current user's ID
       dob: undefined,
       address: "",
       paymentType: "full_payment",
@@ -100,10 +111,24 @@ export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
     },
   });
 
+  // Show loading state while users are being fetched
+  if (isLoadingUsers) {
+    return (
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Customer</DialogTitle>
+          </DialogHeader>
+          <div className="p-4 text-center">
+            <p>Loading user data...</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   const handleSubmit = async (data: FormValues) => {
     try {
-      console.log('Submitting form data:', data);
-      
       const numericAum = data.aum ? parseFloat(data.aum) : undefined;
       
       const customerPayload = {
@@ -111,9 +136,13 @@ export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
         email: data.email,
         mobile: data.mobile,
         city: data.city,
-        serviceTypes: data.serviceTypes,
+        serviceTypes: data.serviceTypes.map(type => 
+          type === "pms" ? "PMS" : 
+          type === "aif" ? "AIF" : 
+          type
+        ),
         startDate: data.startDate || new Date(),
-        assignedTo: data.assignedTo || currentUser?.id,
+        assignedTo: data.assignedTo || undefined,
         dob: data.dob,
         address: data.address,
         engagementFlags: {
@@ -132,8 +161,7 @@ export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
       };
 
       console.log('Sending customer payload:', customerPayload);
-      const newCustomer = await addCustomer(customerPayload);
-      console.log('Customer created successfully:', newCustomer);
+      await addCustomer(customerPayload);
       
       toast({
         title: "Customer added",
@@ -226,12 +254,12 @@ export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
                 name="serviceTypes"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Service Type</FormLabel>
+                    <FormLabel>Service Types</FormLabel>
                     <Select
                       onValueChange={(value) => {
                         const currentTypes = field.value || [];
-                        if (!currentTypes.includes(value as ServiceType)) {
-                          field.onChange([...currentTypes, value as ServiceType]);
+                        if (!currentTypes.includes(value as typeof currentTypes[0])) {
+                          field.onChange([...currentTypes, value as typeof currentTypes[0]]);
                         }
                       }}
                       value={undefined}
@@ -242,9 +270,9 @@ export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"].map((type) => (
-                          <SelectItem key={type} value={type} disabled={field.value?.includes(type as ServiceType)}>
-                            {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        {(["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"] as const).map((type) => (
+                          <SelectItem key={type} value={type} disabled={field.value?.includes(type)}>
+                            {type === "pms" ? "PMS" : type === "aif" ? "AIF" : type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ')}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -255,7 +283,7 @@ export function AddCustomerDialog({ isOpen, onClose }: AddCustomerDialogProps) {
                           key={type}
                           className="flex items-center gap-1 bg-secondary px-2 py-1 rounded-md text-sm"
                         >
-                          <span>{type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                          <span>{type === "pms" ? "PMS" : type === "aif" ? "AIF" : type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ')}</span>
                           <button
                             type="button"
                             onClick={() => {

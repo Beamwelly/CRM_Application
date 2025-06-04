@@ -43,14 +43,14 @@ CREATE TABLE leads (
 -- Lead service types junction table
 CREATE TABLE lead_service_types (
     lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
-    service_type VARCHAR(20) NOT NULL CHECK (service_type IN ('training', 'equity', 'insurance', 'mutual_funds', 'pms', 'aif', 'others')),
+    service_type VARCHAR(20) NOT NULL CHECK (service_type IN ('training', 'equity', 'insurance', 'mutual_funds', 'PMS', 'AIF', 'others')),
     PRIMARY KEY (lead_id, service_type)
 );
 
 -- Update check constraints to include 'wealth' as a valid service type
 ALTER TABLE lead_service_types DROP CONSTRAINT lead_service_types_service_type_check;
 ALTER TABLE lead_service_types ADD CONSTRAINT lead_service_types_service_type_check 
-    CHECK (service_type IN ('training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'pms', 'aif', 'others'));
+    CHECK (service_type IN ('training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'PMS', 'AIF', 'others'));
 
 -- Customers table
 CREATE TABLE customers (
@@ -80,14 +80,14 @@ CREATE TABLE customers (
 -- Customer service types junction table
 CREATE TABLE customer_service_types (
     customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
-    service_type VARCHAR(20) NOT NULL CHECK (service_type IN ('training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'pms', 'aif', 'others')),
+    service_type VARCHAR(20) NOT NULL CHECK (service_type IN ('training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'PMS', 'AIF', 'others')),
     PRIMARY KEY (customer_id, service_type)
 );
 
 -- Update check constraints to include 'wealth' as a valid service type
 ALTER TABLE customer_service_types DROP CONSTRAINT customer_service_types_service_type_check;
 ALTER TABLE customer_service_types ADD CONSTRAINT customer_service_types_service_type_check 
-    CHECK (service_type IN ('training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'pms', 'aif', 'others'));
+    CHECK (service_type IN ('training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'PMS', 'AIF', 'others'));
 
 -- Customer engagement flags
 CREATE TABLE customer_engagement_flags (

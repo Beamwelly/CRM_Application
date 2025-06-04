@@ -78,7 +78,10 @@ export const useCommunicationSlice = (
       const newCommunication = await communicationService.addCommunicationRecord(recordData);
       
       // Add the returned record (which includes id, date, recordingUrl) to local state
-      setCommunicationHistory(prev => [...prev, newCommunication]);
+      setCommunicationHistory(currentHistory => {
+        const history = Array.isArray(currentHistory) ? currentHistory : [];
+        return [...history, newCommunication];
+      });
       return newCommunication;
     } catch (error) {
       console.error('Failed to add communication record via service:', error);
@@ -95,8 +98,14 @@ export const useCommunicationSlice = (
   };
   
   const getAllCommunicationHistory = async (): Promise<HistoryEntry[]> => {
-    console.warn("getAllCommunicationHistory only returns locally cached records.");
-    return [...communicationHistory].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    try {
+      const response = await communicationService.getAllCommunicationHistory();
+      setCommunicationHistory(response);
+      return response;
+    } catch (error) {
+      console.error("Error fetching all communication history:", error);
+      throw error;
+    }
   };
   
   return {

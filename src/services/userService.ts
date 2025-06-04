@@ -22,13 +22,37 @@ type UserCreationPayload = Omit<User, 'id' | 'createdAt'> & { password?: string 
  */
 const getAllUsers = async (): Promise<User[]> => {
   try {
-    // The actual API response might be nested, adjust if necessary
-    const response = await api.get('/users');
-    // Assuming the data is directly the array of users
-    return response as User[]; 
+    console.log('Making API request to fetch users...');
+    const response = await api.get<User[]>('/api/users', {
+      headers: {
+        'X-User-Permissions': JSON.stringify({
+          role: localStorage.getItem('userRole'),
+          permissions: JSON.parse(localStorage.getItem('userPermissions') || '{}')
+        })
+      }
+    });
+    console.log('Raw API response:', response);
+    
+    if (!response) {
+      console.error('No response received from API');
+      return [];
+    }
+    
+    if (!Array.isArray(response)) {
+      console.error('Response is not an array:', response);
+      return [];
+    }
+    
+    console.log('Users by role:', {
+      admins: response.filter(u => u.role === 'admin').length,
+      developers: response.filter(u => u.role === 'developer').length,
+      employees: response.filter(u => u.role === 'employee').length
+    });
+    
+    return response;
   } catch (error) {
     console.error('Failed to fetch users from API:', error);
-    throw error; 
+    throw error;
   }
 };
 
@@ -39,7 +63,7 @@ const getAllUsers = async (): Promise<User[]> => {
  */
 const createUser = async (userData: UserCreationPayload): Promise<User> => {
   try {
-    const newUser = await api.post('/users', userData);
+    const newUser = await api.post('/api/users', userData);
     return newUser as User;
   } catch (error) {
     console.error('Failed to create user via API:', error);
@@ -55,7 +79,7 @@ const createUser = async (userData: UserCreationPayload): Promise<User> => {
  */
 const updateUserPermissions = async (userId: string, permissions: UserPermissions): Promise<User> => {
   try {
-    const updatedUser = await api.put(`/users/${userId}/permissions`, { permissions });
+    const updatedUser = await api.put(`/api/users/${userId}/permissions`, { permissions });
     return updatedUser as User;
   } catch (error) {
     console.error(`Failed to update permissions for user ${userId} via API:`, error);
@@ -70,7 +94,7 @@ const updateUserPermissions = async (userId: string, permissions: UserPermission
  */
 const deleteUser = async (userId: string): Promise<void> => {
   try {
-    await api.delete(`/users/${userId}`);
+    await api.delete(`/api/users/${userId}`);
   } catch (error) {
     console.error(`Failed to delete user ${userId} via API:`, error);
     throw error;
@@ -85,7 +109,7 @@ const deleteUser = async (userId: string): Promise<void> => {
 const addAdmin = async (adminData: FormData): Promise<User> => {
   try {
     // Correct endpoint is /api/admin/create-admin as per backend route setup
-    const newAdmin = await api.post('/admin/create-admin', adminData); 
+    const newAdmin = await api.post('/api/admin/create-admin', adminData); 
     // api.post with FormData should automatically set Content-Type: multipart/form-data
     return newAdmin as User;
   } catch (error) {

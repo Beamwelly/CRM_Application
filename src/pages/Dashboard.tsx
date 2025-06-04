@@ -1,9 +1,7 @@
 import { Layout } from "@/components/layout/Layout";
-import { DashboardActions } from "@/components/dashboard/DashboardActions";
 import { DashboardMetrics } from "@/components/dashboard/DashboardMetrics";
 import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
 import { DashboardTasks } from "@/components/dashboard/DashboardTasks";
-import { DashboardClearData } from "@/components/dashboard/DashboardClearData";
 import { useCRM } from "@/context/hooks";
 import { DeveloperDashboard } from "@/components/dashboard/DeveloperDashboard";
 
@@ -26,11 +24,6 @@ export default function Dashboard() {
           <div>
             <DashboardTasks />
           </div>
-        </div>
-        
-        <div className="flex justify-between items-center">
-          <DashboardActions />
-          <DashboardClearData />
         </div>
       </div>
     </Layout>

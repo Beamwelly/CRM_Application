@@ -17,8 +17,7 @@ export interface AuthActions {
   login: (credentials: Omit<LoginCredentials, 'role'>) => Promise<boolean>; 
   logout: () => void;
   hasServiceTypeAccess: (serviceType: ServiceType) => boolean;
-  // Add new action for Google Login
-  loginWithGoogle: (idToken: string) => Promise<boolean>; 
+  loginWithGoogle: (idToken: string) => Promise<boolean>;
 }
 
 export const useAuthSlice = (/* users parameter might not be needed anymore */): AuthState & AuthActions => {
@@ -97,60 +96,46 @@ export const useAuthSlice = (/* users parameter might not be needed anymore */):
   // Updated logic: check currentUser.permissions
   const hasServiceTypeAccess = (serviceType: ServiceType): boolean => {
     if (!currentUser) return false;
-    // Developers, Admins, and (for now) Employees have access to all service types
-    if (currentUser.role === 'developer' || currentUser.role === 'admin' || currentUser.role === 'employee') {
-      // TODO: Refine employee access later based on specific permissions
-      return true; 
-    }
-    /* 
-    // Check employee permissions (assuming permissions structure accommodates this)
-    // This check depends heavily on how you define service access within permissions
-    // Example: Check a specific permission flag or an array within permissions
-    // return currentUser.permissions?.allowedServices?.includes(serviceType) ?? false;
     
-    // Fallback to old serviceTypeAccess field if still populated and relevant
+    // Developers have access to all service types
+    if (currentUser.role === 'developer') {
+      return true;
+    }
+    
+    // Check permissions for allowed service types
+    if (currentUser.permissions?.allowedServiceTypes) {
+      return currentUser.permissions.allowedServiceTypes.includes(serviceType);
+    }
+    
+    // Fallback to old serviceTypeAccess field if still populated
     if (currentUser.serviceTypeAccess && currentUser.serviceTypeAccess.length > 0) {
       return currentUser.serviceTypeAccess.includes(serviceType);
     }
-    */
     
-    // Default to false if no explicit permission found (shouldn't be reached with current logic)
-    return false; 
+    return false;
   };
 
-  // --- Add Google Login Function --- 
   const loginWithGoogle = async (idToken: string): Promise<boolean> => {
-      setIsLoadingAuth(true);
-      try {
-          console.log("[AuthSlice] Attempting Google Sign-In with backend...");
-          // Call the backend endpoint
-          const response = await api.post('/auth/google', { token: idToken });
-          const authResponse = response as AuthResponse; // Assert type
-
-          if (authResponse.token && authResponse.user) {
-              console.log("[AuthSlice] Google Sign-In successful, user data:", authResponse.user);
-              storeToken(authResponse.token);
-              setCurrentUser(authResponse.user);
-              setIsAuthenticated(true);
-              return true;
-          } else {
-              console.error("[AuthSlice] Google Sign-In backend response missing token or user data");
-              removeToken(); // Ensure no partial login state
-              setIsAuthenticated(false);
-              setCurrentUser(null);
-              return false;
-          }
-      } catch (error) {
-          console.error('[AuthSlice] Google Sign-In failed:', error);
-          removeToken();
-          setIsAuthenticated(false);
-          setCurrentUser(null);
-          return false;
-      } finally {
-          setIsLoadingAuth(false);
+    setIsLoadingAuth(true);
+    try {
+      const response: AuthResponse = await authService.loginWithGoogle(idToken);
+      if (response.token && response.user) {
+        storeToken(response.token);
+        setCurrentUser(response.user);
+        setIsAuthenticated(true);
+        return true;
       }
+      return false;
+    } catch (error) {
+      console.error('Google login failed:', error);
+      removeToken();
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      return false;
+    } finally {
+      setIsLoadingAuth(false);
+    }
   };
-  // --- End Google Login Function --- 
 
   return {
     currentUser,
@@ -159,6 +144,6 @@ export const useAuthSlice = (/* users parameter might not be needed anymore */):
     login,
     logout,
     hasServiceTypeAccess,
-    loginWithGoogle, // Return the new function
+    loginWithGoogle,
   };
 };

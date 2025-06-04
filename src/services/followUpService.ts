@@ -1,5 +1,9 @@
 import { api } from './api';
-import { FollowUp } from '@/types'; // Assuming shared types
+// Assuming ExtendedFollowUp is the one needed for frontend display context,
+// and NewFollowUpData/FollowUpUpdateData are for API payloads.
+import { ExtendedFollowUp as FollowUp } from '@/types/followUp';
+import { NewFollowUpData } from '@/context/slices/followUpSlice';
+import { FollowUpUpdateData } from '@/types/followUp';
 
 // Type for data sent to the API (matches backend validation)
 // Exclude id, date, createdBy as these are handled by backend/context
@@ -18,16 +22,22 @@ interface FollowUpApiData {
  * @param followUpData Data for the new follow-up (notes, nextCallDate, leadId OR customerId).
  * @returns Promise resolving to the newly created FollowUp object from the backend.
  */
-const addFollowUp = async (followUpData: FollowUpApiData): Promise<FollowUp> => {
-  try {
-    // The api.post helper sends the auth token
-    const newFollowUp = await api.post('/follow-ups', followUpData); 
-    return newFollowUp as FollowUp; // Backend should return the created follow-up object
-  } catch (error) {
-    console.error('Failed to add follow-up via API:', error);
-    // Re-throw or handle error appropriately for the UI
-    throw error; 
-  }
+export const addFollowUp = async (followUpData: NewFollowUpData): Promise<FollowUp> => {
+  // Assuming currentUserId logic is handled by a context or passed differently if not available globally
+  // For now, the backend handles creator assignment based on the authenticated user.
+  const newFollowUp = await api.post<FollowUp>('/api/follow-ups', followUpData);
+  return newFollowUp;
+};
+
+/**
+ * Updates an existing follow-up on the backend.
+ * @param followUpId The ID of the follow-up to update.
+ * @param data The data for the update, e.g., { nextCallDate: string (ISO) }.
+ * @returns Promise resolving to the updated FollowUp object.
+ */
+export const updateFollowUp = async (followUpId: string, data: FollowUpUpdateData): Promise<FollowUp> => {
+  const updatedFollowUp = await api.put<FollowUp>(`/api/follow-ups/${followUpId}`, data);
+  return updatedFollowUp;
 };
 
 /**
@@ -36,22 +46,15 @@ const addFollowUp = async (followUpData: FollowUpApiData): Promise<FollowUp> => 
  * @param followUpId The ID of the follow-up to delete.
  * @returns Promise resolving when the deletion is successful.
  */
-const deleteFollowUp = async (followUpId: string): Promise<void> => {
-  try {
-    // The api helper should have a delete method similar to get/post/put
-    // Assuming api.delete exists or will be added to api.ts
-    await api.delete(`/follow-ups/${followUpId}`);
-  } catch (error) {
-    console.error(`Failed to delete follow-up ${followUpId} via API:`, error);
-    // Re-throw or handle error appropriately for the UI
-    throw error;
-  }
+export const deleteFollowUp = async (followUpId: string): Promise<void> => {
+  await api.delete(`/api/follow-ups/${followUpId}`); // Added /api prefix
 };
 
 // TODO: Add functions for getting follow-ups from the backend
 
 export const followUpService = {
   addFollowUp,
+  updateFollowUp,
   deleteFollowUp,
   // ... other functions
 }; 

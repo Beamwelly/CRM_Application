@@ -60,15 +60,13 @@ export function CallDialog({ isOpen, onClose, entityId, entityType, phoneNumber,
         return;
       }
 
-      console.log(`Saving communication with Duration: ${durationToSave}, Status: ${callStatus}, Notes: ${notes.substring(0,20)}..., Base64 present: ${!!base64Data}`);
+      console.log(`Saving communication with Duration: ${durationToSave}, Notes: ${notes.substring(0,20)}..., Base64 present: ${!!base64Data}`);
       await addCommunication({
-      type: 'call',
-      leadId: leadId?.toString(),
-      customerId: customerId?.toString(),
-      notes: notes,
-        createdBy: creatorId,
+        type: 'call',
+        leadId: leadId?.toString(),
+        customerId: customerId?.toString(),
+        notes: notes,
         duration: durationToSave,
-      callStatus: callStatus,
         recordingData: base64Data,
       });
       
@@ -79,7 +77,7 @@ export function CallDialog({ isOpen, onClose, entityId, entityType, phoneNumber,
       console.error("Error adding communication record:", error);
       toast({ title: "Error Saving Call", variant: "destructive" });
     }
-  }, [entityType, entityId, currentUser, addCommunication, notes, callStatus, toast, onClose, formatDuration]);
+  }, [entityType, entityId, currentUser, addCommunication, notes, toast, onClose, formatDuration]);
 
   const stopRecording = useCallback((): Promise<string | null> => {
     return new Promise((resolve) => { // Simplified error handling for now
@@ -256,83 +254,20 @@ export function CallDialog({ isOpen, onClose, entityId, entityType, phoneNumber,
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{callInProgress ? "Call in Progress" : "Make a Call"}</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              {callInProgress
-                ? (
-                  <div className="flex items-center justify-between">
-                    <span>Call with {localName} - {formatDuration(callDuration)}</span>
-                    {isRecording && (
-                      <span className="flex items-center text-red-500 animate-pulse">
-                        <CircleDot className="h-3 w-3 mr-1" /> REC
-                      </span>
-                    )}
-                  </div>
-                )
-                : `Calling ${localName} (${phoneNumberState})`}
-            </div>
+          <DialogTitle>Call Feature</DialogTitle>
+          <DialogDescription>
+            We are implementing this part Soon
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
-          {callInProgress ? (
-            <>
-              <div className="grid gap-2">
-                <Label htmlFor="callNotes">Notes</Label>
-                <NotesTextarea
-                  notes={notes}
-                  onChange={(value: string) => setNotes(value)}
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="callStatus">Call Status</Label>
-                <Select value={callStatus} onValueChange={(value: CallStatus) => setCallStatus(value)}>
-                  <SelectTrigger id="callStatus">
-                    <SelectValue placeholder="Select call status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="missed">Missed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
-          ) : (
-             <div className="grid grid-cols-2 items-center gap-4">
-               <Input
-                 id="name"
-                 value={localName}
-                 onChange={(e) => setLocalName(e.target.value)}
-                 placeholder="Name"
-                 readOnly
-               />
-              <Input
-                id="phoneNumber"
-                value={phoneNumberState}
-                onChange={(e) => setPhoneNumberState(e.target.value)}
-                placeholder="Phone Number"
-                readOnly
-              />
-            </div>
-          )}
+          <div className="text-center text-muted-foreground">
+            The call feature is currently under development. Please check back later for updates.
+          </div>
         </div>
         <DialogFooter>
-          {callInProgress ? (
-            <Button type="button" onClick={endCall} variant="destructive">
-              <PhoneOff className="mr-2 h-4 w-4" /> End Call & Save
-            </Button>
-          ) : (
-            <>
-              <Button type="button" variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="button" onClick={startCall}>
-                <Phone className="mr-2 h-4 w-4" /> Start Call
-              </Button>
-            </>
-          )}
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

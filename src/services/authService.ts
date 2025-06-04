@@ -4,10 +4,6 @@ import { LoginCredentials, AuthResponse, User, ServiceType, Role, UserPermission
 // Update JwtPayload interface to only contain essential fields from the token for initial validation
 interface JwtPayload {
   id: string; // Essential for fetching full profile
-  // email: string; // No longer strictly needed here if full profile is fetched
-  // name: string;  // No longer strictly needed here if full profile is fetched
-  // role: Role;    // Will come from the full profile
-  // permissions: UserPermissions; // Will come from the full profile
   iat?: number;
   exp?: number; // Essential for expiration check
 }
@@ -22,10 +18,11 @@ interface JwtPayload {
 const login = async (credentials: Omit<LoginCredentials, 'role'>): Promise<AuthResponse> => { // Role removed from input type
   try {
     // Send only email and password to the backend
-    const response = await api.post('/auth/login', credentials);
-    console.log('Login successful:', response); 
+    // MODIFIED: Added /api prefix
+    const response = await api.post('/api/auth/login', credentials);
+    console.log('Login successful:', response);
     // Assuming backend returns the full AuthResponse with user object including role/permissions
-    return response as AuthResponse; 
+    return response as AuthResponse;
   } catch (error) {
     console.error('Login failed:', error);
     throw error;
@@ -33,44 +30,43 @@ const login = async (credentials: Omit<LoginCredentials, 'role'>): Promise<AuthR
 };
 
 /**
- * **PLACEHOLDER**: Simulates verifying a token on the backend.
- * Updates to decode role and permissions from the token.
- * @param token The JWT token string.
- * @returns Promise resolving to the User object if token is valid and not expired.
- * @throws Error if token is invalid or expired.
+ * Verifies a token by fetching the user's profile from the backend.
+ * @param token The JWT token string (though not directly used if interceptor handles it).
+ * @returns Promise resolving to the User object if token is valid and profile is fetched.
+ * @throws Error if token is invalid, expired, or profile fetch fails.
  */
-const verifyToken = async (token: string): Promise<User> => {
+const verifyToken = async (token: string): Promise<User> => { // token param might be unused if relying on interceptor
   try {
+    // Basic client-side check for token structure and expiration (optional, backend is source of truth)
     const payloadBase64 = token.split('.')[1];
     if (!payloadBase64) {
       throw new Error("Invalid token format");
     }
     const decoded: JwtPayload = JSON.parse(atob(payloadBase64));
 
-    // Basic check for expiration
     if (decoded.exp && decoded.exp * 1000 < Date.now()) {
-      throw new Error("Token expired");
+      throw new Error("Token expired (client-side check)");
     }
 
-    // Check for essential ID from token
     if (!decoded.id) {
-      throw new Error("Invalid token payload - missing user ID");
+      throw new Error("Invalid token payload - missing user ID (client-side check)");
     }
 
-    // Token seems valid enough to proceed, now fetch the full user profile
-    // Assumes the token will be automatically included in the header by the api instance
-    console.log(`[authService] Token initially validated for user ID: ${decoded.id}. Fetching full profile...`);
-    const fullUserProfileResponse = await api.get('/auth/me'); // ASSUMED ENDPOINT
-    
+    // Fetch the full user profile from the backend
+    // The auth token should be automatically included by the axios interceptor
+    console.log(`[authService] Client-side token check passed for user ID: ${decoded.id}. Fetching full profile...`);
+    // MODIFIED: Added /api prefix
+    const fullUserProfileResponse = await api.get('/api/auth/me'); // Endpoint for fetching user profile
+
     if (!fullUserProfileResponse || typeof fullUserProfileResponse !== 'object') {
-        throw new Error('Invalid user profile data received from /auth/me');
+      throw new Error('Invalid user profile data received from /api/auth/me');
     }
 
-    // Ensure the response looks like a User object (add more checks as needed)
     const userProfile = fullUserProfileResponse as User;
+    // Add more robust validation for the userProfile object
     if (!userProfile.id || !userProfile.email || !userProfile.name || !userProfile.role) {
-        console.error("[authService] Fetched user profile is missing required fields:", userProfile);
-        throw new Error('Fetched user profile is incomplete.');
+      console.error("[authService] Fetched user profile is missing required fields:", userProfile);
+      throw new Error('Fetched user profile is incomplete.');
     }
 
     console.log("[authService] Full user profile fetched successfully:", userProfile);
@@ -78,23 +74,22 @@ const verifyToken = async (token: string): Promise<User> => {
 
   } catch (error) {
     console.error("Token verification and profile fetch failed:", error);
-    // If the error is from the api.get call, it might already be a rich error object
-    // Otherwise, wrap it or re-throw as appropriate
-    if (error instanceof Error && error.message.includes('Request failed')) { // Example check for axios error
-        throw new Error(`Failed to fetch user profile: ${error.message}`);
+    if (error instanceof Error && error.message.includes('Request failed')) {
+      throw new Error(`Failed to fetch user profile: ${error.message}`);
     }
-    throw new Error("Invalid or expired token, or failed to fetch profile.");
+    // Re-throw original error or a new one if it's not already informative
+    throw error instanceof Error ? error : new Error("Invalid or expired token, or failed to fetch profile.");
   }
 };
 
 /**
  * Placeholder for logout functionality.
- * This might involve calling a backend logout endpoint or just clearing local state.
  */
 const logout = async () => {
-  // TODO: Implement logout logic 
-  // e.g., await api.post('/auth/logout');
-  // Clear stored token, reset user state
+  // TODO: Implement logout logic
+  // e.g., await api.post('/api/auth/logout'); // Ensure this path is correct if implemented
+  localStorage.removeItem('authToken'); // Example: Clear token from localStorage
+  // Reset any user state in your application (e.g., Zustand, Redux, Context)
   console.log('User logged out (frontend)');
 };
 
@@ -102,4 +97,4 @@ export const authService = {
   login,
   logout,
   verifyToken,
-}; 
+};

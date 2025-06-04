@@ -28,7 +28,7 @@ export function DashboardCharts({ selectedAdminId, title }: DashboardChartsProps
       setError(null);
       try {
         // --- Modify API endpoint to include selectedAdminId ---
-        let apiUrl = '/dashboard/service-distribution';
+        let apiUrl = '/api/dashboard/service-distribution';
         if (selectedAdminId) {
           apiUrl += `?adminId=${selectedAdminId}`;
         }

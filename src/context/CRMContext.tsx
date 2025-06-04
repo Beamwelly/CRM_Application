@@ -86,6 +86,8 @@ export interface CRMContextType {
   // Developer Admin Filter
   developerAdminFilterId: string | null;
   setDeveloperAdminFilter: (adminId: string | null) => void;
+
+  remarksRefreshTrigger: number;
 }
 
 export const CRMProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -94,14 +96,37 @@ export const CRMProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [errorUsers, setErrorUsers] = useState<string | null>(null);
   // --- State for Developer Admin Filter ---
   const [developerAdminFilterId, setDeveloperAdminFilterId] = useState<string | null>(null);
+  const [remarksRefreshTrigger, setRemarksRefreshTrigger] = useState(0);
+
+  // Initialize slices
+  const authSlice = useAuthSlice();
+  const leadSlice = useLeadSlice();
+  const customerSlice = useCustomerSlice();
 
   const fetchUsers = useCallback(async () => {
     setLoadingUsers(true);
     setErrorUsers(null);
     try {
       console.log("Attempting to fetch users via API...");
+      console.log("Current user permissions:", authSlice.currentUser?.permissions);
       const fetchedUsers = await userService.getAllUsers();
-      console.log("Fetched users:", fetchedUsers);
+      console.log("Raw fetched users data:", fetchedUsers);
+      
+      if (!fetchedUsers) {
+        console.error("No users data received");
+        setErrorUsers('No users data received from server');
+        setUsers([]);
+        return;
+      }
+
+      if (!Array.isArray(fetchedUsers)) {
+        console.error("Invalid users data received:", fetchedUsers);
+        setErrorUsers('Invalid users data received from server');
+        setUsers([]);
+        return;
+      }
+
+      console.log("Setting users in state:", fetchedUsers);
       setUsers(fetchedUsers);
     } catch (err) {
       console.error("Error fetching users:", err);
@@ -110,7 +135,7 @@ export const CRMProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } finally {
       setLoadingUsers(false);
     }
-  }, []);
+  }, [authSlice.currentUser]);
 
   // --- User Management Actions ---
   const addUser = useCallback(async (userData: UserCreationPayload) => {
@@ -161,10 +186,15 @@ export const CRMProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // --- Add Remark Action ---
   const addRemark = useCallback(async (entityType: 'lead' | 'customer', entityId: string | number, remarkText: string) => {
     try {
+      console.log("CRMContext: Adding new remark...");
       const newRemark = await addRemarkService({ entityType, entityId, remarkText });
-      // TODO: Optionally update communication history state immediately 
-      // or rely on the history component re-fetching after dialog closes.
-      // For simplicity now, we won't update state here, assuming re-fetch.
+      console.log("CRMContext: Remark added successfully, triggering refresh...");
+      // Trigger remarks refresh
+      setRemarksRefreshTrigger(prev => {
+        const newValue = prev + 1;
+        console.log("CRMContext: Incrementing remarksRefreshTrigger to:", newValue);
+        return newValue;
+      });
       return newRemark;
     } catch (error) {
       console.error("Error adding remark in context:", error);
@@ -182,10 +212,7 @@ export const CRMProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- End User Management Actions ---
 
-  // Initialize slices
-  const authSlice = useAuthSlice();
-  const leadSlice = useLeadSlice();
-  const customerSlice = useCustomerSlice();
+  // Initialize communication slice
   const communicationSlice = useCommunicationSlice(
     leadSlice.leads,
     customerSlice.customers,
@@ -325,6 +352,8 @@ export const CRMProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // Developer Admin Filter
     developerAdminFilterId,
     setDeveloperAdminFilter,
+
+    remarksRefreshTrigger,
   };
   
   return <CRMContext.Provider value={contextValue}>{children}</CRMContext.Provider>;

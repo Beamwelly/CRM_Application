@@ -33,6 +33,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { FollowUpRescheduleDialog } from '@/components/follow-ups/FollowUpRescheduleDialog';
+import { CallDialog } from '@/components/communication/CallDialog';
+import { followUpService } from '@/services/followUpService';
 
 export default function FollowUps() {
   const { 
@@ -49,6 +51,7 @@ export default function FollowUps() {
   const [isMarkAsDoneDialogOpen, setIsMarkAsDoneDialogOpen] = useState(false);
   const [isRescheduleDialogOpen, setIsRescheduleDialogOpen] = useState(false);
   const [selectedFollowUp, setSelectedFollowUp] = useState<ExtendedFollowUp | null>(null);
+  const [isCallDialogOpen, setIsCallDialogOpen] = useState(false);
   
   const followUpItems: ExtendedFollowUp[] = currentUser?.role === 'employee'
     ? getPendingFollowUps(currentUser.id)
@@ -66,6 +69,26 @@ export default function FollowUps() {
     }
   };
   
+  // Helper function to get phone number and name for the CallDialog
+  const getEntityDetails = (followUp: ExtendedFollowUp | null): { phoneNumber: string; name: string } => {
+    if (!followUp) return { phoneNumber: '', name: 'Unknown' };
+    const { entityType, entityId, leadName, customerName } = followUp;
+
+    let phoneNumber = '';
+    // Name is already available directly from ExtendedFollowUp (leadName or customerName)
+    // Fallback to a generic "Unknown" if both are missing, though one should ideally exist.
+    const name = leadName || customerName || 'Contact'; 
+
+    if (entityType === 'lead' && entityId) {
+      const lead = leads.find(l => String(l.id) === String(entityId));
+      phoneNumber = lead?.mobile || '';
+    } else if (entityType === 'customer' && entityId) {
+      const customer = customers.find(c => String(c.id) === String(entityId));
+      phoneNumber = customer?.mobile || '';
+    }
+    return { phoneNumber, name };
+  };
+
   const handleOpenMarkAsDoneDialog = (followUp: ExtendedFollowUp) => {
     setSelectedFollowUp(followUp);
     setIsMarkAsDoneDialogOpen(true);
@@ -111,47 +134,50 @@ export default function FollowUps() {
     setIsRescheduleDialogOpen(true);
   };
   
-  const handleReschedule = (followUp: BasicFollowUp, newDate: Date) => {
+  const handleReschedule = async (followUp: BasicFollowUp, newDate: Date, notes: string) => {
     if (!followUp) return;
     
-    if (followUp.leadId) {
-      const lead = leads.find(l => String(l.id) === String(followUp.leadId));
-      if (lead) {
-        const updatedFollowUps = (lead.followUps || []).map(f => 
-          f.id === followUp.id ? { ...f, nextCallDate: newDate } : f
-        );
-        updateLead({ ...lead, followUps: updatedFollowUps });
-        toast({ title: "Follow-up rescheduled", description: `Next call for ${lead.name} set to ${format(newDate, 'PP')}.` });
+    try {
+      // Call the API to update the follow-up
+      await followUpService.updateFollowUp(followUp.id, {
+        nextCallDate: newDate.toISOString(),
+        notes: notes
+      });
+
+      // Force a refresh of the follow-ups list
+      if (currentUser?.role === 'employee') {
+        await getPendingFollowUps(currentUser.id);
+      } else {
+        await getPendingFollowUps();
       }
-    } else if (followUp.customerId) {
-      const customer = customers.find(c => String(c.id) === String(followUp.customerId));
-      if (customer) {
-        const updatedFollowUps = (customer.followUps || []).map(f => 
-          f.id === followUp.id ? { ...f, nextCallDate: newDate } : f
-        );
-        updateCustomer({ ...customer, followUps: updatedFollowUps });
-        toast({ title: "Follow-up rescheduled", description: `Next call for ${customer.name} set to ${format(newDate, 'PP')}.` });
-      }
+
+      toast({ 
+        title: "Follow-up rescheduled", 
+        description: `Next call set to ${format(newDate, 'PP')}.` 
+      });
+    } catch (error) {
+      console.error('Failed to reschedule follow-up:', error);
+      toast({
+        title: "Error",
+        description: `Failed to reschedule follow-up: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive"
+      });
     }
+    
     setIsRescheduleDialogOpen(false);
   };
   
   const handleMakeCall = (followUp: ExtendedFollowUp) => {
-    const entityName = followUp.leadId 
-      ? getEntityNameById('lead', followUp.leadId)
-      : getEntityNameById('customer', followUp.customerId);
-    
-    toast({
-      title: "Initiating call",
-      description: `Calling ${entityName}...`,
-    });
-    
-    setTimeout(() => {
+    if (!followUp.entityId || !followUp.entityType) {
       toast({
-        title: "Call connected",
-        description: `You are now connected with ${entityName}.`,
+        title: "Error",
+        description: "Cannot initiate call: missing entity information.",
+        variant: "destructive",
       });
-    }, 1500);
+      return;
+    }
+    setSelectedFollowUp(followUp);
+    setIsCallDialogOpen(true);
   };
   
   const today = new Date();
@@ -250,7 +276,7 @@ export default function FollowUps() {
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleMakeCall(item)}>
                                 <Phone className="mr-2 h-4 w-4" />
-                                <span>Call customer</span>
+                                <span>Call</span>
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -282,12 +308,27 @@ export default function FollowUps() {
         </AlertDialogContent>
       </AlertDialog>
       
-      {selectedFollowUp && (
+      {isRescheduleDialogOpen && selectedFollowUp && (
         <FollowUpRescheduleDialog
           isOpen={isRescheduleDialogOpen}
           onClose={() => setIsRescheduleDialogOpen(false)}
-          followUp={selectedFollowUp as BasicFollowUp}
+          followUp={selectedFollowUp}
           onReschedule={handleReschedule}
+        />
+      )}
+
+      {/* Call Dialog */}
+      {selectedFollowUp && isCallDialogOpen && selectedFollowUp.entityId && selectedFollowUp.entityType && (
+        <CallDialog
+          isOpen={isCallDialogOpen}
+          onClose={() => {
+            setIsCallDialogOpen(false);
+            setSelectedFollowUp(null); 
+          }}
+          entityId={selectedFollowUp.entityId}
+          entityType={selectedFollowUp.entityType}
+          phoneNumber={getEntityDetails(selectedFollowUp).phoneNumber}
+          name={getEntityDetails(selectedFollowUp).name}
         />
       )}
     </Layout>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { User } from '@/types';
 import { useCRM } from '@/context/hooks';
 // import { userService } from '@/services/userService'; // We'll add this later
@@ -22,7 +22,8 @@ export function UserManagementPage() {
     errorLoadingUsers, 
     deleteUser, 
     currentUser, 
-    updateUserPermissions 
+    updateUserPermissions,
+    fetchUsers 
   } = useCRM();
   const navigate = useNavigate();
 
@@ -40,9 +41,43 @@ export function UserManagementPage() {
   const canEditPermissions = currentUser?.permissions?.editUserPermissions ?? false;
   const canDeleteUserPermission = currentUser?.permissions?.deleteUser ?? false;
 
+  // Filter users based on current user's role and permissions
+  const filteredUsers = useMemo(() => {
+    if (!currentUser) return [];
+    
+    console.log('Filtering users:', {
+      currentUser: {
+        id: currentUser.id,
+        role: currentUser.role
+      },
+      allUsers: users
+    });
+    
+    if (currentUser.role === 'developer') {
+      return users;
+    }
+    
+    if (currentUser.role === 'admin') {
+      const filtered = users.filter(user => 
+        user.id === currentUser.id || 
+        user.createdByAdminId === currentUser.id ||
+        user.createdBy === currentUser.id
+      );
+      
+      console.log('Admin filtered users:', {
+        adminId: currentUser.id,
+        filteredUsers: filtered
+      });
+      
+      return filtered;
+    }
+    
+    return users.filter(user => user.id === currentUser.id);
+  }, [users, currentUser]);
+
   // Helper to get creator name
   const getUserNameById = (userId?: string | null): string => {
-    if (!userId) return "System"; // Or "N/A" or an empty string
+    if (!userId) return "System";
     const user = users.find(u => u.id === userId);
     return user ? user.name : "Unknown User";
   };
@@ -51,15 +86,30 @@ export function UserManagementPage() {
     if (selectedUserForDelete) {
       try {
         await deleteUser(selectedUserForDelete.id);
-        // toast({ title: "User Deleted", description: `${selectedUserForDelete.name} has been deleted.` });
+        await fetchUsers(); // Refresh the users list
         setIsDeleteDialogOpen(false);
         setSelectedUserForDelete(null);
       } catch (error) {
         console.error("Delete user error:", error);
-        // toast({ title: "Error", description: `Failed to delete ${selectedUserForDelete.name}.`, variant: "destructive" });
       }
     }
   };
+
+  // Refresh users list when component mounts and periodically
+  useEffect(() => {
+    const loadUsers = async () => {
+      console.log('Fetching users for:', {
+        userId: currentUser?.id,
+        role: currentUser?.role
+      });
+      await fetchUsers();
+    };
+    
+    loadUsers();
+    // Set up periodic refresh
+    const refreshInterval = setInterval(loadUsers, 5000); // Refresh every 5 seconds
+    return () => clearInterval(refreshInterval);
+  }, [fetchUsers, currentUser]);
 
   if (isLoadingUsers) return <Layout><div>Loading users...</div></Layout>;
   if (errorLoadingUsers) return <Layout><div>Error loading users: {errorLoadingUsers}</div></Layout>;
@@ -71,15 +121,15 @@ export function UserManagementPage() {
           <h1 className="text-2xl font-bold">User Management</h1>
           <div className="flex gap-2">
             {(canAddAdmin || canAddEmployee) && (
-                <DropdownMenu>
+              <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline"><Plus className="mr-2 h-4 w-4" /> Add User</Button>
+                  <Button variant="outline"><Plus className="mr-2 h-4 w-4" /> Add User</Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                    {canAddAdmin && <DropdownMenuItem onClick={() => navigate('/users/add-admin')}>Add Admin</DropdownMenuItem>}
-                    {canAddEmployee && <DropdownMenuItem onClick={() => navigate('/users/add-employee')}>Add Employee</DropdownMenuItem>}
+                  {canAddAdmin && <DropdownMenuItem onClick={() => navigate('/users/add-admin')}>Add Admin</DropdownMenuItem>}
+                  {canAddEmployee && <DropdownMenuItem onClick={() => navigate('/users/add-employee')}>Add Employee</DropdownMenuItem>}
                 </DropdownMenuContent>
-                </DropdownMenu>
+              </DropdownMenu>
             )}
           </div>
         </div>
@@ -97,14 +147,14 @@ export function UserManagementPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.length === 0 ? (
+                {filteredUsers.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center">
                       No users found.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  users.map((user) => (
+                  filteredUsers.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell>{user.name}</TableCell>
                       <TableCell>{user.email}</TableCell>
@@ -119,21 +169,21 @@ export function UserManagementPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             {canEditPermissions && (
-                                <DropdownMenuItem 
-                                    onClick={() => { setSelectedUserForPermissions(user); setIsPermissionsDialogOpen(true); }}
-                                    disabled={user.id === currentUser?.id || user.role === 'developer'}
-                                >
+                              <DropdownMenuItem 
+                                onClick={() => { setSelectedUserForPermissions(user); setIsPermissionsDialogOpen(true); }}
+                                disabled={user.id === currentUser?.id || user.role === 'developer'}
+                              >
                                 <Settings className="mr-2 h-4 w-4" /> Edit Permissions
-                                </DropdownMenuItem>
+                              </DropdownMenuItem>
                             )}
-                             {canDeleteUserPermission && (
-                                <DropdownMenuItem 
-                                    onClick={() => { setSelectedUserForDelete(user); setIsDeleteDialogOpen(true); }}
-                                    disabled={user.id === currentUser?.id || user.role === 'developer'}
-                                    className="text-destructive focus:text-destructive"
-                                >
+                            {canDeleteUserPermission && (
+                              <DropdownMenuItem 
+                                onClick={() => { setSelectedUserForDelete(user); setIsDeleteDialogOpen(true); }}
+                                disabled={user.id === currentUser?.id || user.role === 'developer'}
+                                className="text-destructive focus:text-destructive"
+                              >
                                 <Trash className="mr-2 h-4 w-4" /> Delete User
-                                </DropdownMenuItem>
+                              </DropdownMenuItem>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -149,39 +199,37 @@ export function UserManagementPage() {
 
       {selectedUserForPermissions && (
         <EditUserPermissionsDialog
-            isOpen={isPermissionsDialogOpen}
-            onClose={() => { setIsPermissionsDialogOpen(false); setSelectedUserForPermissions(null); }}
-            user={selectedUserForPermissions}
-            onSave={async (userId, permissions) => {
-                try {
-                    await updateUserPermissions(userId, permissions);
-                    // toast({ title: "Permissions Updated", description: `${selectedUserForPermissions.name}'s permissions saved.` });
-                    setIsPermissionsDialogOpen(false);
-                    setSelectedUserForPermissions(null);
-                } catch (error) {
-                    console.error("Update permissions error:", error);
-                    // toast({ title: "Error", description: "Failed to update permissions.", variant: "destructive" });
-                }
-            }}
+          isOpen={isPermissionsDialogOpen}
+          onClose={() => { setIsPermissionsDialogOpen(false); setSelectedUserForPermissions(null); }}
+          user={selectedUserForPermissions}
+          onSave={async (userId, permissions) => {
+            try {
+              await updateUserPermissions(userId, permissions);
+              await fetchUsers(); // Refresh the users list
+              setIsPermissionsDialogOpen(false);
+              setSelectedUserForPermissions(null);
+            } catch (error) {
+              console.error("Update permissions error:", error);
+            }
+          }}
         />
       )}
 
-        <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete the user 
-                    <strong>{selectedUserForDelete?.name}</strong>.
-                </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setSelectedUserForDelete(null)}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDeleteUser} className="bg-destructive hover:bg-destructive/90">Delete</AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
-
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the user 
+              <strong>{selectedUserForDelete?.name}</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setSelectedUserForDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteUser} className="bg-destructive hover:bg-destructive/90">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Layout>
   );
 } 

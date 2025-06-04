@@ -12,14 +12,14 @@ export function AudioPlayer({ src }: AudioPlayerProps) {
   const [error, setError] = useState<string | null>(null);
 
   // Construct the full audio URL
-  const apiUrl = import.meta.env.VITE_API_URL || ''; // e.g., http://localhost:3001/api
+  const apiUrl = import.meta.env.VITE_API_BASE_URL || ''; // Use VITE_API_BASE_URL
   let baseUrl = '';
   try {
     // Extract the base part (scheme + host + port) from the API URL
     const urlObject = new URL(apiUrl);
     baseUrl = urlObject.origin; // e.g., http://localhost:3001
   } catch (e) {
-    console.error("Invalid VITE_API_URL format:", apiUrl);
+    console.error("Invalid VITE_API_BASE_URL format:", apiUrl);
     // Fallback or handle error appropriately
   }
   

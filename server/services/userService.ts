@@ -23,6 +23,7 @@ interface User {
   employeeCreationLimit?: number | null;
   // Optional old field (might be deprecated by permissions)
   serviceTypeAccess?: string[];
+  logoUrl?: string;
 }
 
 // User type for creation - requires password, omits generated fields
@@ -39,40 +40,80 @@ interface AuthUserInfo {
 
 // Fetch all users along with their service type access (excluding password hash)
 export const getAllUsers = async (requestor: AuthUserInfo): Promise<Omit<User, 'passwordHash'>[]> => {
-  let sqlQuery = 'SELECT id, name, email, role, permissions, created_by_admin_id as "createdByAdminId", employee_creation_limit as "employeeCreationLimit", created_at as "createdAt" FROM users';
+  let sqlQuery = `
+    SELECT 
+      id, name, email, role, permissions, 
+      created_by_admin_id as "createdByAdminId", 
+      employee_creation_limit as "employeeCreationLimit", 
+      created_at as "createdAt", 
+      logo_url as "logoUrl", 
+      created_by as "createdBy"
+    FROM users
+  `;
   const params: QueryParamValue[] = [];
   let paramIndex = 1;
 
-  // Get the view scope from the requestor's permissions
-  const viewScope = requestor.permissions?.viewUsers || 'none'; 
+  // Ensure requestor has proper permissions
+  if (!requestor || !requestor.id || !requestor.role) {
+    console.error('Invalid requestor:', requestor);
+    throw new Error('Invalid user session');
+  }
 
-  if (requestor.role === 'developer' && viewScope === 'all') {
-    // Developer with 'all' scope sees everyone - No WHERE clause needed
-  } else if (requestor.role === 'admin' && viewScope === 'subordinates') {
-    // Admin with 'subordinates' scope sees self and employees they created
-    sqlQuery += ` WHERE id = $${paramIndex} OR created_by_admin_id = $${paramIndex}`;
+  console.log('Getting users for requestor:', {
+    id: requestor.id,
+    role: requestor.role,
+    permissions: requestor.permissions
+  });
+
+  if (requestor.role === 'developer') {
+    // Developer sees everyone - No WHERE clause needed
+  } else if (requestor.role === 'admin') {
+    // Admin should see themselves and their employees
+    sqlQuery += ` WHERE (
+      id = $${paramIndex} OR 
+      created_by_admin_id = $${paramIndex} OR 
+      created_by = $${paramIndex}
+    )`;
     params.push(requestor.id);
-    paramIndex++; // Increment index
-  } else if (requestor.role === 'admin' && viewScope === 'all') {
-    // Admin with 'all' scope sees everyone - No WHERE clause needed
-    console.warn(`Admin ${requestor.id} has 'all' user view scope.`); 
-  } else if (viewScope === 'none') {
-    // Any role with 'none' scope only sees self
-    sqlQuery += ` WHERE id = $${paramIndex++}`;
-    params.push(requestor.id);
+    paramIndex++;
   } else {
-    // Handle unexpected roles or scopes - default to seeing only self for safety
-    console.warn(`User ${requestor.id} (Role: ${requestor.role}) has unexpected viewUsers scope: ${viewScope}. Defaulting to self.`);
-    sqlQuery += ` WHERE id = $${paramIndex++}`;
+    // Other roles only see themselves
+    sqlQuery += ` WHERE id = $${paramIndex}`;
     params.push(requestor.id);
+    paramIndex++;
   }
   
   sqlQuery += ' ORDER BY name ASC';
 
   try {
+    console.log('Executing query:', {
+      sqlQuery,
+      params,
+      requestorId: requestor.id,
+      requestorRole: requestor.role
+    });
+    
     const result = await query(sqlQuery, params);
-    // Assuming DB driver parses JSONB permissions field correctly into objects
-    return result.rows as Omit<User, 'passwordHash'>[];
+    
+    console.log('Query result:', {
+      rowCount: result.rows.length,
+      rows: result.rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        role: r.role,
+        createdByAdminId: r.createdByAdminId,
+        createdBy: r.createdBy
+      }))
+    });
+    
+    // Parse permissions if they're stored as JSON strings
+    const users = result.rows.map(user => ({
+      ...user,
+      permissions: typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions,
+      logoUrl: user.logoUrl || null
+    }));
+    
+    return users as Omit<User, 'passwordHash'>[];
   } catch (error) {
     console.error('Error fetching users:', error);
     throw new Error('Failed to fetch users');
@@ -139,7 +180,8 @@ export const getUserById = async (userId: string): Promise<Omit<User, 'passwordH
         id, name, email, role, permissions, 
         created_by_admin_id as "createdByAdminId", 
         employee_creation_limit as "employeeCreationLimit", 
-        created_at as "createdAt"
+        created_at as "createdAt",
+        logo_url as "logoUrl"
       FROM users
       WHERE id = $1
     `, [userId]);
@@ -150,16 +192,13 @@ export const getUserById = async (userId: string): Promise<Omit<User, 'passwordH
 
     const user = result.rows[0];
 
-    // Assume permissions are parsed by the DB driver if JSONB
-    // Add parsing logic here if permissions are stored as JSON strings
-    // let parsedPermissions = {};
-    // try {
-    //   parsedPermissions = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions;
-    // } catch (e) { console.error('Error parsing permissions'); }
+    // Parse permissions if they're stored as JSON strings
+    const parsedPermissions = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions;
 
     return {
       ...user,
-      // permissions: parsedPermissions // Assign parsed permissions if needed
+      permissions: parsedPermissions,
+      logoUrl: user.logoUrl || null // Ensure logoUrl is always included, defaulting to null if not present
     } as Omit<User, 'passwordHash'>;
 
   } catch (error) {
@@ -188,14 +227,14 @@ export const countEmployeesCreatedByAdmin = async (adminId: string): Promise<num
 // These should mirror the definitions in src/types/index.ts
 const DEFAULT_DEVELOPER_PERMISSIONS: Required<UserPermissions> = {
   viewLeads: 'all', createLeads: true, editLeads: 'all', deleteLeads: 'all', assignLeads: true,
-  viewCustomers: 'all', createCustomers: true, editCustomers: 'all', deleteCustomers: 'all', manageRenewals: true,
+  viewCustomers: 'all', createCustomers: true, editCustomers: 'all', deleteCustomers: 'all', assignCustomers: true, manageRenewals: true,
   viewCommunications: 'all', addCommunications: true, playRecordings: true, downloadRecordings: true,
   viewUsers: 'all', createAdmin: true, createEmployee: true, editUserPermissions: true, deleteUser: true,
 };
 
 const DEFAULT_ADMIN_PERMISSIONS: Required<UserPermissions> = {
   viewLeads: 'created', createLeads: true, editLeads: 'created', deleteLeads: 'created', assignLeads: true, 
-  viewCustomers: 'created', createCustomers: true, editCustomers: 'created', deleteCustomers: 'created', manageRenewals: true,
+  viewCustomers: 'subordinates', createCustomers: true, editCustomers: 'created', deleteCustomers: 'created', manageRenewals: true,
   viewCommunications: 'created', addCommunications: true, playRecordings: true, downloadRecordings: true,
   viewUsers: 'subordinates', createAdmin: false, createEmployee: true, editUserPermissions: true, deleteUser: true, 
 };
@@ -323,33 +362,48 @@ export const updateUserPermissions = async (
   }
   
   // Additional Check: Admins might only be allowed to edit their own employees
-  let userToUpdate: Omit<User, 'passwordHash'> | null = null; // Define userToUpdate variable
+  let userToUpdate: Omit<User, 'passwordHash'> | null = null;
   if (requestor.role === 'admin') {
-    // Fetch the user being updated to check their created_by_admin_id
-    userToUpdate = await getUserById(userIdToUpdate); // Use the helper function
+    userToUpdate = await getUserById(userIdToUpdate);
     if (!userToUpdate || userToUpdate.createdByAdminId !== requestor.id) {
       throw new Error('Permission denied: Admins can only edit permissions for employees they created.');
     }
-    console.warn('Admin permission update check implemented.'); // Update log message
   }
-  // Developers can edit anyone (no additional checks needed here)
+
+  // Ensure allowedServiceTypes is properly set
+  if (!newPermissions.allowedServiceTypes) {
+    newPermissions.allowedServiceTypes = [];
+  }
 
   const sqlQuery = `
     UPDATE users 
-    SET permissions = $1, updated_at = NOW()
+    SET 
+      permissions = $1,
+      updated_at = NOW()
     WHERE id = $2
-    RETURNING id, name, email, role, permissions, created_by_admin_id as "createdByAdminId", employee_creation_limit as "employeeCreationLimit", created_at as "createdAt"
+    RETURNING 
+      id, 
+      name, 
+      email, 
+      role, 
+      permissions,
+      created_by_admin_id as "createdByAdminId", 
+      employee_creation_limit as "employeeCreationLimit", 
+      created_at as "createdAt"
   `;
-  const params = [JSON.stringify(newPermissions), userIdToUpdate];
+  
+  const params = [
+    JSON.stringify(newPermissions),
+    userIdToUpdate
+  ];
 
   try {
     const result = await query(sqlQuery, params);
     if (result.rows.length === 0) {
       throw new Error('User not found or update failed.');
     }
-    // TODO: Parse permissions before returning
+    
     const updatedUser = result.rows[0];
-    // Assume permissions are automatically parsed if JSONB
     return updatedUser as Omit<User, 'passwordHash'>;
   } catch (error) {
     console.error(`Error updating permissions for user ${userIdToUpdate}:`, error);
@@ -391,10 +445,14 @@ export const deleteUser = async (userIdToDelete: string, requestor: AuthUserInfo
       // throw new Error('User not found.'); 
     }
     // Deletion successful, return void
-  } catch (error) {
-    console.error(`Error deleting user ${userIdToDelete}:`, error);
+  } catch (dbError) { // Renamed error to dbError for clarity
+    console.error(`Database error while deleting user ${userIdToDelete}:`, dbError); // Log the detailed error
     // Handle potential foreign key constraint errors if user deletion isn't cascaded properly
-    throw new Error('Failed to delete user.');
+    // Check for common foreign key violation error codes/messages if possible
+    if (dbError instanceof Error && dbError.message.includes('foreign key constraint')) { // Example check
+        throw new Error('Failed to delete user: This user is referenced by other records in the system (e.g., leads, customers, or other users they created). Please reassign or remove these references before deleting.');
+    }
+    throw new Error('Failed to delete user due to a database issue.'); // More specific generic error
   }
 };
 
@@ -450,6 +508,149 @@ export const createAdmin = async (
   } catch (error) {
     console.error('Error creating admin user:', error);
     throw new Error('Failed to create admin user in database');
+  }
+};
+
+export const storeGoogleTokens = async (
+  userId: string,
+  accessToken: string,
+  refreshToken: string
+) => {
+  try {
+    // First, store the tokens
+    await query(
+      'INSERT INTO google_tokens (user_id, access_token, refresh_token) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET access_token = $2, refresh_token = $3',
+      [userId, accessToken, refreshToken]
+    );
+
+    // Then update the user's gmail_connected status
+    await query(
+      'UPDATE users SET gmail_connected = true WHERE id = $1',
+      [userId]
+    );
+
+    return true;
+  } catch (error) {
+    console.error('Error storing Google tokens:', error);
+    throw error;
+  }
+};
+
+export const getGoogleTokens = async (userId: string) => {
+  try {
+    const result = await query(
+      'SELECT access_token, refresh_token FROM google_tokens WHERE user_id = $1',
+      [userId]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error getting Google tokens:', error);
+    throw error;
+  }
+};
+
+export const disconnectGmail = async (userId: string) => {
+  try {
+    // Remove tokens
+    await query(
+      'DELETE FROM google_tokens WHERE user_id = $1',
+      [userId]
+    );
+
+    // Update user status
+    await query(
+      'UPDATE users SET gmail_connected = false WHERE id = $1',
+      [userId]
+    );
+
+    return true;
+  } catch (error) {
+    console.error('Error disconnecting Gmail:', error);
+    throw error;
+  }
+};
+
+export const createEmployee = async (
+  employeeData: Omit<User, 'id' | 'createdAt' | 'createdBy' | 'createdByAdminId' | 'permissions' | 'logoUrl'>,
+  creator: AuthUserInfo
+): Promise<Omit<User, 'passwordHash'>> => {
+  // Permission check
+  if (!creator.permissions?.createEmployee) {
+    throw new Error('Permission denied: Cannot create employees.');
+  }
+
+  // Role check - only admins can create employees
+  if (creator.role !== 'admin') {
+    throw new Error('Permission denied: Only admins can create employees.');
+  }
+
+  // Get the admin's logo URL and permissions
+  const adminResult = await query(
+    'SELECT logo_url, permissions FROM users WHERE id = $1',
+    [creator.id]
+  );
+  
+  if (adminResult.rows.length === 0) {
+    throw new Error('Admin not found');
+  }
+
+  const adminLogoUrl = adminResult.rows[0].logo_url;
+  const adminPermissions = adminResult.rows[0].permissions;
+
+  // Hash the password
+  const salt = await bcrypt.genSalt(10);
+  const passwordHash = await bcrypt.hash(employeeData.passwordHash, salt);
+
+  // Create the employee with the admin's logo and default employee permissions
+  const sqlQuery = `
+    INSERT INTO users (
+      name, email, password_hash, role, position, 
+      service_type_access, created_by_admin_id, logo_url,
+      permissions, created_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    RETURNING 
+      id, name, email, role, position, 
+      service_type_access as "serviceTypeAccess",
+      created_by_admin_id as "createdByAdminId",
+      created_at as "createdAt",
+      logo_url as "logoUrl",
+      permissions,
+      created_by as "createdBy"
+  `;
+
+  const params = [
+    employeeData.name,
+    employeeData.email,
+    passwordHash,
+    'employee',
+    employeeData.position,
+    JSON.stringify(employeeData.serviceTypeAccess || ['training']),
+    creator.id, // Set created_by_admin_id to the creator's ID
+    adminLogoUrl || null,
+    JSON.stringify(DEFAULT_EMPLOYEE_PERMISSIONS),
+    creator.id // Set created_by to the creator's ID
+  ];
+
+  try {
+    console.log('Creating employee with params:', {
+      name: employeeData.name,
+      email: employeeData.email,
+      creatorId: creator.id,
+      adminLogoUrl
+    });
+    
+    const result = await query(sqlQuery, params);
+    const newEmployee = result.rows[0];
+    
+    console.log('Created employee:', newEmployee);
+    
+    return {
+      ...newEmployee,
+      logoUrl: newEmployee.logoUrl || adminLogoUrl || null
+    } as Omit<User, 'passwordHash'>;
+  } catch (error) {
+    console.error('Error creating employee:', error);
+    throw new Error('Failed to create employee in database');
   }
 };
 

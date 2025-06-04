@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import { pool } from '../db';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { login, verifyGoogleTokenAndLogin } from '../services/authService';
+import { login } from '../services/authService';
 import { protect } from '../middleware/authMiddleware';
 
 dotenv.config();
@@ -95,25 +95,13 @@ router.post('/login', loginHandler);
 router.get('/logout', logoutHandler);
 router.get('/status', statusHandler);
 
-// --- Google Login Route --- 
-router.post('/google', async (req, res, next) => {
-    try {
-        const { token } = req.body; // Expecting { token: "GOOGLE_ID_TOKEN" }
-        if (!token) {
-            return res.status(400).json({ message: 'Google ID token is required' });
-        }
-        const result = await verifyGoogleTokenAndLogin(token);
-        res.json(result); // Send back user object and app token
-    } catch (error) {
-        console.error("Google login route error:", error);
-        res.status(401).json({ message: 'Google Sign-In failed' });
-    }
-});
-
 // --- Example Protected Route (e.g., to get current user) ---
-// router.get('/me', protect, (req, res) => {
-//     // req.user should be populated by the protect middleware
-//     res.json(req.user);
-// });
+router.get('/me', protect, (req, res) => {
+    // req.user should be populated by the protect middleware
+    if (!req.user) {
+        return res.status(401).json({ message: 'Not authorized or token invalid' });
+    }
+    res.json(req.user);
+});
 
 export default router;

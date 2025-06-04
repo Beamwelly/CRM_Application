@@ -8,7 +8,8 @@ import {
   Clock,
   UserCog,
   ShieldPlus,
-  Mail
+  Mail,
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -84,6 +85,13 @@ export function SidebarNav() {
       title: 'Renewals',
       href: '/renewals',
       icon: Calendar,
+      roles: ['developer', 'employee', 'admin'],
+      permission: 'any',
+    },
+    {
+      title: 'Remarks',
+      href: '/remarks',
+      icon: MessageSquare,
       roles: ['developer', 'employee', 'admin'],
       permission: 'any',
     },

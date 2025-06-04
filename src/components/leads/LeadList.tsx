@@ -57,11 +57,12 @@ export function LeadList() {
     hasServiceTypeAccess,
     addLead,
     developerAdminFilterId,
-    setDeveloperAdminFilter
+    setDeveloperAdminFilter,
+    isLoadingUsers
   } = useCRM();
   
   // Define all service types
-  const serviceTypes: ServiceType[] = ["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"];
+  const serviceTypes: ServiceType[] = ["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"];
 
   // State for dialogs
   const [filter, setFilter] = useState<'all' | ServiceType>('all');
@@ -79,7 +80,7 @@ export function LeadList() {
 
   // --- Subordinate IDs Calculation (for Developer filter) ---
   const subordinateIds = React.useMemo(() => {
-    if (!developerAdminFilterId) return [];
+    if (!developerAdminFilterId || !users) return [];
     return users
       .filter(user => user.role === 'employee' && user.createdByAdminId === developerAdminFilterId)
       .map(user => user.id);
@@ -120,11 +121,28 @@ export function LeadList() {
 
   // Get user name by ID
   const getUserNameById = (userId?: string): string => {
-    if (!userId) return "Unassigned";
+    if (!userId || !users) return "Unassigned";
     const user = users.find(user => user.id === userId);
     // Only include position if it exists
     return user ? (user.position ? `${user.name} (${user.position})` : user.name) : "Unknown"; 
   };
+
+  // Show loading state while users are being fetched
+  if (isLoadingUsers) {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Leads</h2>
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
+        </div>
+        <div className="border rounded-lg p-4">
+          <p>Loading leads data...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Status badge color and styles
   const getStatusBadgeVariant = (status: string): "default" | "destructive" | "outline" | "secondary" => {
@@ -232,6 +250,26 @@ export function LeadList() {
   };
   // --- End Permission Check Helpers ---
 
+  // Add helper functions for lead type badge
+  const getLeadTypeBadgeVariant = (type: string): 'default' | 'destructive' | 'outline' | 'secondary' => {
+    switch (type) {
+      case 'hot': return 'destructive';      // red
+      case 'warm': return 'outline';         // yellow/gray
+      case 'cold': return 'secondary';       // blue/gray
+      case 'not_contacted': return 'default';
+      default: return 'default';
+    }
+  };
+  const getLeadTypeBadgeClass = (type: string): string => {
+    switch (type) {
+      case 'hot': return 'bg-red-500 text-white';
+      case 'warm': return 'bg-yellow-400 text-black';
+      case 'cold': return 'bg-blue-400 text-white';
+      case 'not_contacted': return 'bg-gray-300 text-gray-800';
+      default: return '';
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -309,6 +347,7 @@ export function LeadList() {
               <TableHead>Email</TableHead>
               <TableHead>Mobile</TableHead>
               <TableHead>City</TableHead>
+              <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Assigned To</TableHead>
               <TableHead>Created By</TableHead>
@@ -320,7 +359,7 @@ export function LeadList() {
           <TableBody>
             {filteredLeads.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={(currentUser?.role === 'admin' || currentUser?.role === 'developer') ? 7 : 6} className="text-center">
+                <TableCell colSpan={(currentUser?.role === 'admin' || currentUser?.role === 'developer') ? 8 : 7} className="text-center">
                   No leads found
                 </TableCell>
               </TableRow>
@@ -332,7 +371,12 @@ export function LeadList() {
                   <TableCell>{lead.mobile}</TableCell>
                   <TableCell>{lead.city}</TableCell>
                   <TableCell>
-                    <Badge variant={getStatusBadgeVariant(lead.status)} className={cn("capitalize", getStatusBadgeClass(lead.status))}>
+                    <Badge variant={getLeadTypeBadgeVariant(lead.lead_status)} className={cn('capitalize', getLeadTypeBadgeClass(lead.lead_status))}>
+                      {(lead.lead_status ?? 'not_contacted').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={getStatusBadgeVariant(lead.status)} className={cn('capitalize', getStatusBadgeClass(lead.status))}>
                       {lead.status.replace(/_/g, ' ')}
                     </Badge>
                   </TableCell>
@@ -462,6 +506,9 @@ export function LeadList() {
             <CommunicationHistory 
               entityId={selectedLead.id}
               entityType="lead"
+              onRemarkAdded={() => {
+                setIsAddRemarkOpen(false);
+              }}
             />
           </DialogContent>
         </Dialog>

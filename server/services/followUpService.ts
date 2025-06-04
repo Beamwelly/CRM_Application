@@ -1,44 +1,44 @@
 import { query, QueryParamValue } from '../db';
-// Remove the problematic import
-// import { FollowUp } from '@/types'; 
 
-// Define minimal FollowUp type locally
+// --- Local Type Definitions ---
+interface AuthenticatedUser {
+  id: string;
+  role: 'developer' | 'admin' | 'employee';
+}
+
 interface FollowUp {
   id: string;
-  date: Date;
   notes: string;
-  nextCallDate: Date; 
-  leadId?: string; 
+  nextCallDate: string; // ISO Date string
+  userId: string;
+  leadId?: string;
   customerId?: string;
-  createdBy: string; 
+  isCompleted: boolean;
+  createdAt: string; // ISO Date string
+  updatedAt: string; // ISO Date string
 }
 
-// Define structure for user info passed from auth middleware
-// (Should match other services)
-interface AuthUserInfo {
-  id: string;
-  role: 'developer' | 'admin' | 'employee'; // Added role for permission checks
-  // Add other relevant fields like permissions if needed for checks
+interface NewFollowUpData { // This type IS used by addFollowUp in this file, so keep it.
+  notes: string;
+  nextCallDate: string; // ISO Date string for input
+  leadId?: string;
+  customerId?: string;
 }
 
-// Type for the data needed to create a follow-up, excluding server-set fields
-type FollowUpCreationData = Omit<FollowUp, 'id' | 'date'>; // Exclude id (generated) and date (default)
+interface FollowUpUpdateData {
+  nextCallDate?: string; // ISO Date string for input
+  notes?: string;
+  isCompleted?: boolean;
+}
 
-/**
- * Adds a new follow-up record to the database.
- * Links it to either a lead or a customer.
- * @param followUpData Data for the follow-up (notes, nextCallDate, leadId OR customerId).
- * @param creator User creating the follow-up.
- * @returns Promise resolving to the newly created FollowUp object.
- * @throws Error if both leadId and customerId are provided or missing, or on DB error.
- */
+// --- End Local Type Definitions ---
+
 export const addFollowUp = async (
-  followUpData: FollowUpCreationData,
-  creator: AuthUserInfo
+  followUpData: NewFollowUpData,
+  creator: AuthenticatedUser
 ): Promise<FollowUp> => {
-  const { notes, nextCallDate, leadId, customerId, createdBy } = followUpData;
+  const { notes, nextCallDate, leadId, customerId } = followUpData;
 
-  // --- Validation ---
   if (!notes || !nextCallDate) {
     throw new Error('Notes and Next Call Date are required for follow-up.');
   }
@@ -49,84 +49,64 @@ export const addFollowUp = async (
     throw new Error('Follow-up cannot be linked to both a lead and a customer.');
   }
   
-  // Use the creator's ID from the authenticated user info
-  const finalCreatedBy = creator.id;
+  const creatorUserId = creator.id;
 
-  // --- Database Insert ---
   const sqlQuery = `
-    INSERT INTO follow_ups (date, notes, next_call_date, created_by, lead_id, customer_id)
-    VALUES (NOW(), $1, $2, $3, $4, $5)
-    RETURNING id, date, notes, next_call_date as "nextCallDate", created_by as "createdBy", lead_id as "leadId", customer_id as "customerId"
+    INSERT INTO follow_ups (date, notes, next_call_date, created_by, lead_id, customer_id, created_at, updated_at, is_completed)
+    VALUES (NOW(), $1, $2, $3, $4, $5, NOW(), NOW(), false)
+    RETURNING 
+      id, notes, next_call_date, created_by, lead_id, customer_id, is_completed, created_at, updated_at;
   `;
 
-  const params: QueryParamValue[] = [
-    notes,
-    nextCallDate,
-    finalCreatedBy,
-    leadId || null, // Ensure null if undefined
-    customerId || null // Ensure null if undefined
-  ];
+  const params: QueryParamValue[] = [notes, nextCallDate, creatorUserId, leadId || null, customerId || null];
 
   try {
     const result = await query(sqlQuery, params);
     if (result.rows.length === 0) {
       throw new Error('Failed to create follow-up, no record returned.');
     }
-    return result.rows[0] as FollowUp;
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      notes: row.notes,
+      nextCallDate: new Date(row.next_call_date).toISOString(),
+      userId: row.created_by,
+      leadId: row.lead_id,
+      customerId: row.customer_id,
+      isCompleted: row.is_completed,
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
   } catch (error) {
     console.error('Error creating follow-up in database:', error);
-    // Handle specific DB errors if necessary (e.g., foreign key violation)
     throw new Error('Failed to save follow-up to database.');
   }
 };
 
-/**
- * Deletes a follow-up record from the database.
- * @param followUpId The ID of the follow-up to delete.
- * @param deleter The user attempting to delete the follow-up.
- * @returns Promise resolving to the number of rows affected (0 or 1).
- * @throws Error if permission is denied or on DB error.
- */
 export const deleteFollowUp = async (
   followUpId: string,
-  deleter: AuthUserInfo
+  deleter: AuthenticatedUser
 ): Promise<number> => {
-  // Fetch the follow-up to check ownership/permissions
-  let followUpToDelete: FollowUp | undefined;
+  let followUpOwnerId: string | undefined;
   try {
-    const result = await query('SELECT * FROM follow_ups WHERE id = $1', [followUpId]);
-    if (result.rows.length === 0) {
-      // Follow-up not found, can be considered successfully "deleted" or throw an error
+    const selectResult = await query('SELECT created_by FROM follow_ups WHERE id = $1', [followUpId]);
+    if (selectResult.rows.length === 0) {
       console.warn(`Follow-up with ID ${followUpId} not found for deletion.`);
-      return 0; // Or throw new Error('Follow-up not found');
+      return 0; 
     }
-    followUpToDelete = result.rows[0] as FollowUp;
+    followUpOwnerId = selectResult.rows[0].created_by;
   } catch (error) {
-    console.error(`Error fetching follow-up ${followUpId} for deletion:`, error);
-    throw new Error('Failed to retrieve follow-up details for deletion.');
+    console.error(`Error fetching follow-up ${followUpId} for deletion check:`, error);
+    throw new Error('Failed to retrieve follow-up details for deletion check.');
   }
 
-  // Permission check:
-  // - Developer/Admin can delete any.
-  // - Employee can delete only if they created it.
-  // More complex scenarios might involve checking if the employee is assigned to the parent lead/customer.
-  let canDelete = false;
-  if (deleter.role === 'developer' || deleter.role === 'admin') {
-    canDelete = true;
-  } else if (deleter.role === 'employee' && followUpToDelete.createdBy === deleter.id) {
-    canDelete = true;
-  }
-
-  if (!canDelete) {
+  if (deleter.role !== 'admin' && deleter.role !== 'developer' && followUpOwnerId !== deleter.id) {
     throw new Error('Permission denied: You do not have permission to delete this follow-up.');
   }
 
-  // --- Database Delete ---
-  const sqlQuery = 'DELETE FROM follow_ups WHERE id = $1';
-  const params: QueryParamValue[] = [followUpId];
-
+  const deleteQuery = 'DELETE FROM follow_ups WHERE id = $1';
   try {
-    const result = await query(sqlQuery, params);
+    const result = await query(deleteQuery, [followUpId]);
     return result.rowCount ?? 0;
   } catch (error) {
     console.error(`Error deleting follow-up ${followUpId} from database:`, error);
@@ -134,4 +114,86 @@ export const deleteFollowUp = async (
   }
 };
 
-// TODO: Add functions for retrieving follow-ups (e.g., getFollowUpsForLead, getFollowUpsForCustomer, getPendingFollowUpsByUser) 
+export const updateFollowUp = async (
+  followUpId: string, 
+  data: FollowUpUpdateData,
+  requestor: AuthenticatedUser
+): Promise<FollowUp> => {
+  let existingFollowUpOwnerId: string | undefined;
+  try {
+    const selectResult = await query('SELECT created_by FROM follow_ups WHERE id = $1', [followUpId]);
+    if (selectResult.rows.length === 0) {
+      throw new Error('Follow-up not found.');
+    }
+    existingFollowUpOwnerId = selectResult.rows[0].created_by;
+  } catch (error) {
+    console.error(`Error fetching follow-up ${followUpId} for update check:`, error);
+    if (error instanceof Error && error.message === 'Follow-up not found.') throw error;
+    throw new Error('Failed to retrieve follow-up details for update check.');
+  }
+
+  if (requestor.role !== 'admin' && requestor.role !== 'developer' && existingFollowUpOwnerId !== requestor.id) {
+    throw new Error('Permission denied: You can only update your own follow-ups.');
+  }
+
+  const fieldsToUpdate: string[] = [];
+  const values: QueryParamValue[] = []; 
+  let paramIndex = 1;
+
+  if (data.nextCallDate !== undefined) {
+    fieldsToUpdate.push(`next_call_date = $${paramIndex++}`);
+    values.push(data.nextCallDate);
+  }
+  if (data.notes !== undefined) {
+    fieldsToUpdate.push(`notes = $${paramIndex++}`);
+    values.push(data.notes);
+  }
+  if (data.isCompleted !== undefined) {
+    fieldsToUpdate.push(`is_completed = $${paramIndex++}`);
+    values.push(data.isCompleted);
+  }
+
+  if (fieldsToUpdate.length === 0) {
+    const currentFollowUpResult = await query('SELECT id, notes, next_call_date, created_by, lead_id, customer_id, is_completed, created_at, updated_at FROM follow_ups WHERE id = $1', [followUpId]);
+    if (currentFollowUpResult.rows.length === 0) throw new Error('Follow-up disappeared during update attempt.');
+    const row = currentFollowUpResult.rows[0];
+    return {
+      id: row.id,
+      notes: row.notes,
+      nextCallDate: new Date(row.next_call_date).toISOString(),
+      userId: row.created_by,
+      leadId: row.lead_id,
+      customerId: row.customer_id,
+      isCompleted: row.is_completed,
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  fieldsToUpdate.push(`updated_at = NOW()`);
+  values.push(followUpId); 
+
+  const updateQuery = `
+    UPDATE follow_ups 
+    SET ${fieldsToUpdate.join(', ')}
+    WHERE id = $${paramIndex}
+    RETURNING id, notes, next_call_date, created_by, lead_id, customer_id, is_completed, created_at, updated_at;
+  `;
+
+  const result = await query(updateQuery, values);
+  if (result.rows.length === 0) {
+    throw new Error('Failed to update follow-up or follow-up not found after update attempt.');
+  }
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    notes: row.notes,
+    nextCallDate: new Date(row.next_call_date).toISOString(),
+    userId: row.created_by,
+    leadId: row.lead_id,
+    customerId: row.customer_id,
+    isCompleted: row.is_completed,
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  };
+};

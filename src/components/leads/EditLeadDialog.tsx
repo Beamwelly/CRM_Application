@@ -8,7 +8,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCRM } from "@/context/hooks";
-import { Lead, ServiceType, TrainingLeadStatus, WealthLeadStatus, User } from "@/types";
+import { Lead, ServiceType, TrainingLeadStatus, WealthLeadStatus, User, LeadType } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 
 interface EditLeadDialogProps {
@@ -30,16 +30,59 @@ const formSchema = z.object({
   // Revert: AUM is simple optional string
   aum: z.string().optional(), 
   assignedTo: z.string().uuid("Invalid user UUID").optional().nullable(),
-  status: z.string(), // Keep status dropdown value
-  serviceTypes: z.array(z.enum(["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"] as const)).min(1, "At least one service type is required"),
+  lead_status: z.enum(["hot", "warm", "cold", "not_contacted"] as const),
+  status: z.string(),
+  serviceTypes: z.array(z.enum(["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"] as const)).min(1, "At least one service type is required"),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
 export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
-  const { updateLead, users, currentUser } = useCRM();
+  const { updateLead, users, currentUser, isLoadingUsers } = useCRM();
   const { toast } = useToast();
   
+  // Get available roles based on current user
+  const availableUsers = React.useMemo(() => {
+    console.log("Calculating available users. Current user:", currentUser);
+    console.log("All users:", users);
+    
+    if (!currentUser || !users) {
+      console.log("No current user or users array is empty");
+      return [];
+    }
+    
+    let filteredUsers: User[] = [];
+    
+    if (currentUser.role === 'developer' || currentUser.role === 'admin') {
+      // Show all users except developers for admin/developer
+      filteredUsers = users.filter(u => u.role !== 'developer');
+    } else if (currentUser.role === 'employee') {
+      // For employees, show only themselves if they have assignLeads permission
+      if (currentUser.permissions?.assignLeads) {
+        filteredUsers = [currentUser];
+      }
+    }
+    
+    console.log("Filtered users:", filteredUsers);
+    return filteredUsers;
+  }, [users, currentUser]);
+
+  // Show loading state while users are being fetched
+  if (isLoadingUsers) {
+    return (
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Lead</DialogTitle>
+          </DialogHeader>
+          <div className="p-4 text-center">
+            <p>Loading user data...</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema), // Use reverted static schema
     defaultValues: {
@@ -53,6 +96,7 @@ export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
       // Revert: Convert number back to string for input
       aum: lead.aum ? String(lead.aum) : "", 
       assignedTo: lead.assignedTo || "",
+      lead_status: lead.lead_status || "not_contacted",
       status: lead.status || "new",
       serviceTypes: lead.serviceTypes || [],
     },
@@ -71,6 +115,7 @@ export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
         company: lead.company || "",
         aum: lead.aum ? String(lead.aum) : "", // Revert: Convert number to string
         assignedTo: lead.assignedTo || "",
+        lead_status: lead.lead_status || "not_contacted",
         status: lead.status || "new",
         serviceTypes: lead.serviceTypes || [],
       });
@@ -103,7 +148,7 @@ export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
     // Revert: Simple AUM conversion
     const numericAum = data.aum ? parseFloat(data.aum) : undefined;
 
-    updateLead({
+    const updatedLead = {
       ...lead, // Spread existing lead data
       name: data.name,
       email: data.email,
@@ -115,9 +160,13 @@ export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
       // Revert: Include AUM if valid number
       aum: (numericAum && !isNaN(numericAum)) ? numericAum : undefined,
       assignedTo: data.assignedTo || undefined,
+      lead_status: data.lead_status, // Ensure lead_status is included
       status: data.status as TrainingLeadStatus | WealthLeadStatus, 
       serviceTypes: data.serviceTypes || [],
-    });
+    };
+
+    console.log('Updating lead with data:', updatedLead);
+    updateLead(updatedLead);
     
     toast({
       title: "Lead updated",
@@ -224,25 +273,48 @@ export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
 
             <FormField
               control={form.control}
+              name="lead_status"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Type</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="hot">Hot</SelectItem>
+                      <SelectItem value="warm">Warm</SelectItem>
+                      <SelectItem value="cold">Cold</SelectItem>
+                      <SelectItem value="not_contacted">Not Contacted</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
               name="status"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Status</FormLabel>
-                  <Select 
-                    onValueChange={field.onChange} 
-                    defaultValue={field.value}
-                  >
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select status" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {getStatusOptions().map(option => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="new">New</SelectItem>
+                      <SelectItem value="not_connected">Not Connected</SelectItem>
+                      <SelectItem value="follow_up">Follow Up</SelectItem>
+                      <SelectItem value="ready_to_attend">Ready to Attend</SelectItem>
+                      <SelectItem value="attended">Attended</SelectItem>
+                      <SelectItem value="interested">Interested</SelectItem>
+                      <SelectItem value="consultation_done">Consultation Done</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -286,22 +358,20 @@ export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
                       <FormLabel>Assign To</FormLabel>
                       <Select 
                         onValueChange={field.onChange} 
-                        // Use null for the value of "Not assigned"
-                        value={field.value || undefined} 
+                        value={field.value}
+                        disabled={!['developer', 'admin'].includes(currentUser?.role || '') && !currentUser?.permissions?.assignLeads}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Assign to Employee" />
+                            <SelectValue placeholder="Select assignee" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {users
-                            .filter(user => user.role === 'employee')
-                            .map((user) => (
-                              <SelectItem key={user.id} value={user.id}>
-                                {user.name} ({user.position})
-                              </SelectItem>
-                            ))}
+                          {availableUsers.map((user) => (
+                            <SelectItem key={user.id} value={user.id}>
+                              {user.name} ({user.position})
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -363,9 +433,9 @@ export function EditLeadDialog({ isOpen, onClose, lead }: EditLeadDialogProps) {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {["training", "equity", "insurance", "mutual_funds", "pms", "aif", "others"].map((type) => (
-                        <SelectItem key={type} value={type} disabled={field.value && field.value.includes(type as ServiceType)}>
-                          {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      {["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"].map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type === "PMS" ? "PMS" : type === "AIF" ? "AIF" : type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ')}
                         </SelectItem>
                       ))}
                     </SelectContent>

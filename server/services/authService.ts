@@ -1,8 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query, getPool } from '../db'; 
-import { OAuth2Client } from 'google-auth-library'; // Import Google library
-import { User, Role, LoginCredentials, AuthResponse, UserPermissions } from '../@types'; // Use relative path for types
+import { User, Role, LoginCredentials, AuthResponse, UserPermissions } from '../@types';
 
 // Ensure JWT_SECRET is loaded (typically via dotenv in server.ts)
 if (!process.env.JWT_SECRET) {
@@ -10,14 +9,8 @@ if (!process.env.JWT_SECRET) {
 }
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// --- Google Client ID --- 
-// IMPORTANT: Replace with your actual Google Client ID
-const GOOGLE_CLIENT_ID = "823042096678-6lggef057ploajcoll5c9k6gnknmali5.apps.googleusercontent.com"; 
-const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
-
 // --- Existing comparePassword --- 
 export const comparePassword = async (password: string, hash: string): Promise<boolean> => {
-    // ... keep existing comparePassword logic ... 
     if (!password || !hash) return false;
     try {
         return await bcrypt.compare(password, hash);
@@ -103,101 +96,6 @@ export const login = async (credentials: Omit<LoginCredentials, 'role'>): Promis
 
     const token = generateToken(user);
     return { user, token };
-};
-
-// --- New Google Login Service ---
-export const verifyGoogleTokenAndLogin = async (idToken: string): Promise<AuthResponse> => {
-    try {
-        const ticket = await googleClient.verifyIdToken({
-            idToken: idToken,
-            audience: GOOGLE_CLIENT_ID, 
-        });
-        const payload = ticket.getPayload();
-
-        if (!payload) {
-            throw new Error('Invalid Google token payload.');
-        }
-
-        const { email, name, sub: googleId } = payload;
-
-        if (!email) {
-            throw new Error('Email not found in Google token payload.');
-        }
-
-        // Check if user exists by email
-        const userResult = await query('SELECT *, logo_url FROM users WHERE email = $1', [email]);
-        const userRecord = userResult.rows.length > 0 ? userResult.rows[0] : null;
-        let user: User | null = null;
-
-        if (userRecord) {
-            console.log(`[AuthService] Google Sign-In: User found with email ${email}`);
-             // Construct user object from record
-             user = {
-                 id: userRecord.id,
-                 name: userRecord.name,
-                 email: userRecord.email,
-                 role: userRecord.role,
-                 position: userRecord.position,
-                 serviceTypeAccess: userRecord.serviceTypeAccess,
-                 permissions: userRecord.permissions || defaultEmployeePermissions, // Ensure permissions exist
-                 createdAt: userRecord.created_at,
-                 createdBy: userRecord.created_by,
-                 employeeCreationLimit: userRecord.employee_creation_limit,
-                 createdByAdminId: userRecord.created_by_admin_id,
-                 google_id: userRecord.google_id,
-                 logoUrl: userRecord.logo_url // Add logoUrl
-             };
-        } else {
-            // User does not exist - Create new employee user
-            console.log(`[AuthService] Google Sign-In: Creating new user for email ${email}`);
-            const newUserQuery = `
-                INSERT INTO users (name, email, role, permissions, google_id, logo_url)
-                VALUES ($1, $2, $3, $4, $5, null) -- logoUrl is null initially
-                RETURNING *, logo_url
-            `;
-            const newUserParams = [
-                name || 'Google User', // Use Google name or a default
-                email,
-                'employee' as Role, // Default role
-                JSON.stringify(defaultEmployeePermissions), // Default minimal permissions
-                googleId
-            ];
-            const newUserResult = await query(newUserQuery, newUserParams);
-            const newUserRecord = newUserResult.rows[0];
-
-            // --- Add null check for newUserRecord ---
-            if (!newUserRecord) {
-                throw new Error('Failed to create new user record in database.');
-            }
-            // --- End null check ---
-
-            // Construct user object from the new record
-            user = {
-                id: newUserRecord.id,
-                name: newUserRecord.name,
-                email: newUserRecord.email,
-                role: newUserRecord.role,
-                permissions: defaultEmployeePermissions, // Use default permissions object
-                createdAt: newUserRecord.created_at,
-                google_id: newUserRecord.google_id,
-                logoUrl: newUserRecord.logo_url // Will be null
-            };
-            console.log("[AuthService] New user created:", user);
-        }
-
-        if (!user) {
-             throw new Error('Failed to find or create user after Google Sign-In.');
-        }
-
-        // Generate app token for the found/created user
-        const token = generateToken(user);
-        return { user, token };
-
-    } catch (error) {
-        console.error('Error verifying Google token or logging in user:', error);
-        // Don't expose detailed error messages potentially
-        throw new Error('Google Sign-In failed.'); 
-    }
 };
 
 // --- Existing Verify Token Service --- 

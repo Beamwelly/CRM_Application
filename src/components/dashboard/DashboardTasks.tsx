@@ -11,8 +11,8 @@ export function DashboardTasks() {
   
   // Sort by the date within the nested followUp object
   followUpItems.sort((a, b) => {
-    const dateA = typeof a.followUp.nextCallDate === 'string' ? new Date(a.followUp.nextCallDate) : a.followUp.nextCallDate;
-    const dateB = typeof b.followUp.nextCallDate === 'string' ? new Date(b.followUp.nextCallDate) : b.followUp.nextCallDate;
+    const dateA = typeof a.nextCallDate === 'string' ? new Date(a.nextCallDate) : a.nextCallDate;
+    const dateB = typeof b.nextCallDate === 'string' ? new Date(b.nextCallDate) : b.nextCallDate;
     if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) return 0; 
     return dateA.getTime() - dateB.getTime();
   });
@@ -31,24 +31,23 @@ export function DashboardTasks() {
           </p>
         ) : (
           upcomingFollowUps.map((item) => { 
-            const followUp = item.followUp; // Extract nested followUp for easier access
-            const entity = item.entity; // Extract nested entity
-            const nextCallDate = typeof followUp.nextCallDate === 'string' ? new Date(followUp.nextCallDate) : followUp.nextCallDate;
+            // Properties are assumed to be directly on 'item'
+            const nextCallDate = typeof item.nextCallDate === 'string' ? new Date(item.nextCallDate) : item.nextCallDate;
             return (
               <div 
-                key={followUp.id} // Use id from nested followUp
+                key={item.id} // Use id directly from item
                 className="flex flex-col p-3 border rounded-md"
               >
                 <div className="flex justify-between items-start">
                   <span className="font-medium">
-                    {entity.name || 'Unknown Contact'} // Use name from nested entity
+                    {item.leadName || item.customerName || 'Unknown Contact'} // Use leadName or customerName
                   </span>
                   <span className="text-sm text-muted-foreground">
-                    {!isNaN(nextCallDate.getTime()) ? format(nextCallDate, 'dd MMM yyyy') : 'Invalid Date'} // Use date from nested followUp
+                    {!isNaN(nextCallDate.getTime()) ? format(nextCallDate, 'dd MMM yyyy') : 'Invalid Date'} // Use date from item
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground line-clamp-1">
-                  {followUp.notes} // Use notes from nested followUp
+                  {item.notes} // Use notes directly from item
                 </p>
               </div>
             );

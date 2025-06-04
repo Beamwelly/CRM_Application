@@ -1,51 +1,56 @@
-import React from 'react';
-import { User, UserPermissions } from '@/types';
-import { useCRM } from '@/context/hooks';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-  DialogClose // Import DialogClose if needed for implicit closing
-} from "@/components/ui/dialog";
-import { PermissionsEditor } from './PermissionsEditor'; // Import the editor
+import React, { useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../components/ui/dialog';
+import { PermissionsEditor } from './PermissionsEditor';
+import { User } from '../../types';
+import { Button } from '../../components/ui/button';
 
 interface EditUserPermissionsDialogProps {
   isOpen: boolean;
   onClose: () => void;
   user: User;
+  onSave: (userId: string, permissions: any) => Promise<void>;
 }
 
-export function EditUserPermissionsDialog({ isOpen, onClose, user }: EditUserPermissionsDialogProps) {
-  const { updateUserPermissions } = useCRM(); // Get the update function from context
+export function EditUserPermissionsDialog({ isOpen, onClose, user, onSave }: EditUserPermissionsDialogProps) {
+  const [permissions, setPermissions] = useState<UserPermissions>(user.permissions);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // The PermissionsEditor handles its own saving state and calls this function
-  const handleUpdatePermissions = async (userId: string, permissions: UserPermissions) => {
-    // The updateUserPermissions function from CRMContext already handles API call & state update
-    await updateUserPermissions(userId, permissions);
-    // The PermissionsEditor shows success/error toasts
-    onClose(); // Close dialog after successful update (PermissionsEditor also calls onClose on success)
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onSave(user.id, permissions);
+      onClose();
+    } catch (error) {
+      console.error('Error saving permissions:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-2xl"> {/* Use a wider dialog for permissions */}
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Permissions for {user.name}</DialogTitle>
           <DialogDescription>
-            Adjust the access levels for {user.email}.
+            Configure what actions this user can perform in the system.
           </DialogDescription>
         </DialogHeader>
-
-        {/* Pass user and the update handler to the editor */}
-        <PermissionsEditor 
-          user={user} 
-          onUpdatePermissions={handleUpdatePermissions} 
-          onClose={onClose} // Pass onClose so the editor can close the dialog
-        />
-        {/* Footer is part of PermissionsEditor */}
+        <div className="space-y-6 py-4">
+          <PermissionsEditor
+            user={user}
+            onUpdatePermissions={(newPermissions) => setPermissions(newPermissions)}
+            onClose={onClose}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

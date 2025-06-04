@@ -11,12 +11,15 @@ import { ChevronsUpDown, Check } from "lucide-react";
 import { cn } from '@/lib/utils';
 
 export function DeveloperDashboard() {
-    const { users, setDeveloperAdminFilter, developerAdminFilterId } = useCRM();
+    const { users, setDeveloperAdminFilter, developerAdminFilterId, isLoadingUsers } = useCRM();
 
-    const adminUsers = users.filter(user => user.role === 'admin').map(admin => ({
-        value: admin.id,
-        label: admin.name,
-    }));
+    const adminUsers = React.useMemo(() => {
+        if (!users) return [];
+        return users.filter(user => user.role === 'admin').map(admin => ({
+            value: admin.id,
+            label: admin.name,
+        }));
+    }, [users]);
 
     const [openCombobox, setOpenCombobox] = useState(false);
 
@@ -24,6 +27,24 @@ export function DeveloperDashboard() {
         setDeveloperAdminFilter(adminId);
         setOpenCombobox(false);
     };
+
+    if (isLoadingUsers) {
+        return (
+            <div className="space-y-6">
+                <div className="flex flex-col items-start space-y-2">
+                    <label htmlFor="admin-select-combobox" className="text-sm font-medium">Select Admin to View Data:</label>
+                    <Button
+                        variant="outline"
+                        className="w-[300px] justify-between"
+                        disabled
+                    >
+                        Loading...
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">

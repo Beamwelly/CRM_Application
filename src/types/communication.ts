@@ -1,7 +1,7 @@
 import { User } from './index';
 import { HistoryEntry } from '.'; // Assuming HistoryEntry is in index.ts
 
-export type CommunicationType = 'call' | 'email' | 'remark';
+export type CommunicationType = 'call' | 'email' | 'meeting' | 'note' | 'remark';
 
 export type CallStatus = 'completed' | 'missed' | 'cancelled';
 

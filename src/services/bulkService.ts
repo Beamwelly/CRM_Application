@@ -21,7 +21,7 @@ interface BulkUploadResponse {
  */
 const uploadLeads = async (leadsData: ParsedRow[]): Promise<BulkUploadResponse> => {
   try {
-    const response = await api.post('/bulk/leads', leadsData);
+    const response = await api.post('/api/bulk/leads', leadsData);
     return response as BulkUploadResponse;
   } catch (error) {
     console.error('Failed to bulk upload leads via API:', error);
@@ -36,7 +36,7 @@ const uploadLeads = async (leadsData: ParsedRow[]): Promise<BulkUploadResponse> 
  */
 const uploadCustomers = async (customersData: ParsedRow[]): Promise<BulkUploadResponse> => {
   try {
-    const response = await api.post('/bulk/customers', customersData);
+    const response = await api.post('/api/bulk/customers', customersData);
     return response as BulkUploadResponse;
   } catch (error) {
     console.error('Failed to bulk upload customers via API:', error);

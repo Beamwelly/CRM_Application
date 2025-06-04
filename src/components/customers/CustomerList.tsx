@@ -39,7 +39,7 @@ export function CustomerList() {
   const { toast } = useToast();
   
   // Define all service types
-  const serviceTypes: ServiceType[] = ["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"];
+  const serviceTypes: ServiceType[] = ["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"];
 
   const [filter, setFilter] = useState<'all' | ServiceType>('all');
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);

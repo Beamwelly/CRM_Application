@@ -1,28 +1,29 @@
 import express, { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod'; // Import Zod
-import { createCommunicationRecord, getCommunicationHistory, getSentEmails, getRecordingFilePath } from '../services/communicationService';
+import { createCommunicationRecord, getCommunicationHistory, getSentEmails, getRecordingFilePath, retryFailedEmails } from '../services/communicationService';
 import { protect } from '../middleware/authMiddleware'; // Import protect middleware
 import { User } from '../@types'; 
+import { AuthUserInfo } from '../services/communicationService';
 
 // --- Zod Schema for Communication Record Creation ---
 const communicationSchema = z.object({
   type: z.enum(['call', 'email', 'meeting', 'other', 'remark'], { required_error: 'Type is required' }),
   notes: z.string().optional(),
-  leadId: z.string().uuid().optional(),
-  customerId: z.string().uuid().optional(),
+  lead_id: z.string().uuid().optional(),
+  customer_id: z.string().uuid().optional(),
   // Call specific
   duration: z.number().int().positive().optional(),
-  callStatus: z.enum(['completed', 'missed', 'cancelled']).optional(),
-  recordingData: z.string().optional(), // Optional Base64 string for recording
+  call_status: z.enum(['completed', 'missed', 'cancelled']).optional(),
+  recording_data: z.string().optional(), // Optional Base64 string for recording
   // Email specific
-  emailSubject: z.string().optional(),
-  emailBody: z.string().optional(),
-}).refine(data => data.leadId || data.customerId, {
-  message: "Must provide either leadId or customerId",
-  path: ["leadId", "customerId"], 
-}).refine(data => !(data.leadId && data.customerId), {
-    message: "Cannot provide both leadId and customerId",
-    path: ["leadId", "customerId"],
+  email_subject: z.string().optional(),
+  email_body: z.string().optional(),
+}).refine(data => data.lead_id || data.customer_id, {
+  message: "Must provide either lead_id or customer_id",
+  path: ["lead_id", "customer_id"], 
+}).refine(data => !(data.lead_id && data.customer_id), {
+    message: "Cannot provide both lead_id and customer_id",
+    path: ["lead_id", "customer_id"],
 });
 
 // Validation Middleware (reuse or define locally)
@@ -150,13 +151,85 @@ router.get('/emails', protect, async (req: Request, res: Response, next: NextFun
     if (!req.user) {
       return res.status(401).json({ message: 'Not authorized' });
     }
+    
+    console.log('[CommRoutes] Fetching emails for user:', {
+      id: req.user.id,
+      role: req.user.role,
+      permissions: req.user.permissions
+    });
+    
     // Fetch sent emails accessible to req.user
     const emails = await getSentEmails(req.user); 
     res.json(emails);
   } catch (error) {
+    console.error('[CommRoutes] Error in /emails route:', {
+      error,
+      stack: error instanceof Error ? error.stack : undefined,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      user: req.user ? {
+        id: req.user.id,
+        role: req.user.role,
+        permissions: req.user.permissions
+      } : 'No user'
+    });
+    
+    // Handle specific error types
+    if (error instanceof Error) {
+      if (error.message.includes('Database connection failed')) {
+        return res.status(503).json({ 
+          message: 'Service temporarily unavailable',
+          error: 'Database connection error'
+        });
+      }
+      if (error.message.includes('table') || error.message.includes('column')) {
+        return res.status(500).json({ 
+          message: 'Database configuration error',
+          error: error.message
+        });
+      }
+    }
+    
+    // Default error response
+    res.status(500).json({ 
+      message: 'Failed to fetch emails',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// --- NEW: POST /api/communications/retry-emails --- 
+// Retries sending failed emails (admin only)
+router.post('/retry-emails', protect, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+    
+    // Only allow admins or developers to retry emails
+    if (req.user.role !== 'admin' && req.user.role !== 'developer') {
+      return res.status(403).json({ message: 'Permission denied: Only admins can retry failed emails' });
+    }
+    
+    await retryFailedEmails();
+    res.json({ message: 'Email retry process initiated' });
+  } catch (error) {
+    console.error('Error retrying failed emails:', error);
     next(error);
   }
 });
+
+// Get sent emails
+router.get('/sent-emails', protect, async (req, res) => {
+  try {
+    const user = req.user as AuthUserInfo;
+    const emails = await getSentEmails(user);
+    res.json(emails);
+  } catch (error) {
+    console.error('Error fetching sent emails:', error);
+    res.status(500).json({ error: 'Failed to fetch sent emails' });
+  }
+});
+
 // --- END NEW --- 
 
-export default router; 
+export default router;

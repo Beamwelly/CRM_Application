@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { useCRM } from "@/context/hooks";
 import { useToast } from "@/hooks/use-toast";
 import { CalendarWithPointerEvents } from "@/components/ui/calendar-with-pointer-events";
-import { FollowUp } from "@/types";
+import { NewFollowUpData } from "@/context/slices/followUpSlice";
 
 interface FollowUpDialogProps {
   isOpen: boolean;
@@ -43,7 +43,7 @@ export function FollowUpDialog({ isOpen, onClose, leadId, customerId }: FollowUp
     resolver: zodResolver(formSchema),
     defaultValues: {
       notes: "",
-      nextCallDate: new Date(new Date().setDate(new Date().getDate() + 7)), // Default to one week from now
+      nextCallDate: new Date(),
     },
   });
   
@@ -51,7 +51,7 @@ export function FollowUpDialog({ isOpen, onClose, leadId, customerId }: FollowUp
     if (isOpen) {
       form.reset({
         notes: "",
-        nextCallDate: new Date(new Date().setDate(new Date().getDate() + 7)),
+        nextCallDate: new Date(),
       });
     }
   }, [isOpen, form]);
@@ -78,8 +78,8 @@ export function FollowUpDialog({ isOpen, onClose, leadId, customerId }: FollowUp
       return;
     }
 
-    // Create the follow-up data object without entity IDs
-    const followUpData: Omit<FollowUp, 'id' | 'leadId' | 'customerId' | 'createdBy' | 'date'> = {
+    // Create the follow-up data object with the correct type
+    const followUpData: NewFollowUpData = {
       nextCallDate: data.nextCallDate.toISOString(),
       notes: data.notes,
     };

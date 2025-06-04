@@ -2,6 +2,7 @@ import { query, QueryParamValue } from '../db';
 import fs from 'fs/promises'; // Import fs promises API
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import nodemailer from 'nodemailer';
 // Removed problematic imports
 // import { CommunicationRecord } from '../../src/types'; 
 // import { AuthUserInfo } from './userService'; 
@@ -13,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 export interface CommunicationRecord {
   id: string;
   // Merged types from both interfaces
-  type: 'call' | 'email' | 'meeting' | 'other' | 'remark'; 
+  type: 'call' | 'meeting' | 'other' | 'remark'; 
   date: Date;
   createdBy: string; // User ID
   leadId?: string | number;
@@ -22,11 +23,7 @@ export interface CommunicationRecord {
   // Call specific
   notes?: string; // Used for call notes OR remark text
   duration?: number; 
-  callStatus?: 'completed' | 'missed' | 'cancelled';
   recordingUrl?: string;
-  // Email specific
-  emailSubject?: string;
-  emailBody?: string;
   // Remark specific
   remarkText?: string; // Keep for frontend clarity when ADDING, but store in notes
 }
@@ -40,7 +37,7 @@ interface UserPermissions {
 }
 
 // Update AuthUserInfo to use new Role and include permissions
-interface AuthUserInfo {
+export interface AuthUserInfo {
   id: string;
   role: Role; // Use updated Role type
   permissions: UserPermissions; // Add permissions
@@ -52,18 +49,134 @@ type CreateCommunicationData = Omit<CommunicationRecord, 'id' | 'date' | 'record
 
 // Type for unified creation payload
 type CreateCommunicationPayload = {
-  type: 'call' | 'email' | 'remark';
-  notes?: string; // Call notes or Remark text
-  leadId?: string | number;
-  customerId?: string | number;
-  // Call specific
+  type: 'call' | 'meeting' | 'other' | 'remark';
+  notes?: string;
+  remark_text?: string;
+  lead_id?: string | number;
+  customer_id?: string | number;
   duration?: number;
-  callStatus?: 'completed' | 'missed' | 'cancelled';
-  recordingData?: string; // Base64 data for calls
-  // Email specific
-  emailSubject?: string;
-  emailBody?: string;
+  recording_data?: string;
 }; 
+
+// Email transporter configuration
+const emailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // true for 465, false for other ports
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_APP_PASSWORD,
+  },
+  tls: {
+    rejectUnauthorized: false // Only use this in development
+  }
+});
+
+// Verify transporter configuration
+emailTransporter.verify(function(error, success) {
+  if (error) {
+    console.error('[CommService] Email transporter verification failed:', error);
+  } else {
+    console.log('[CommService] Email transporter is ready to send messages');
+  }
+});
+
+/**
+ * Sends an actual email using nodemailer
+ */
+export const sendActualEmail = async (
+  to: string,
+  subject: string,
+  body: string,
+  from: string = process.env.EMAIL_USER || '',
+  parentEmailId?: string
+): Promise<boolean> => {
+  try {
+    console.log('[CommService] Email configuration:', {
+      user: process.env.EMAIL_USER,
+      hasPassword: !!process.env.EMAIL_APP_PASSWORD,
+      from,
+      to,
+      subject
+    });
+    
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+      throw new Error('Email configuration is missing. Please check your .env file.');
+    }
+
+    // Generate a unique message ID
+    const messageId = `<${Date.now()}.${Math.random().toString(36).substring(2)}@${process.env.EMAIL_USER}>`;
+
+    // If this is a reply, get the parent email's message ID
+    let inReplyTo: string | undefined;
+    let references: string[] = [];
+    
+    if (parentEmailId) {
+      const parentResult = await query(
+        'SELECT email_message_id, email_references FROM communication_records WHERE id = $1',
+        [parentEmailId]
+      );
+      
+      if (parentResult.rows.length > 0) {
+        const parent = parentResult.rows[0];
+        inReplyTo = parent.email_message_id;
+        references = [...(parent.email_references || []), parent.email_message_id];
+      }
+    }
+
+    // Format the email body with proper HTML and line breaks
+    const formattedBody = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        ${body.split('\n\n').map(paragraph => {
+          if (paragraph.trim() === '') {
+            return '<br>';
+          }
+          return `<p style="margin: 0 0 1em 0;">${paragraph.split('\n').join('<br>')}</p>`;
+        }).join('')}
+      </div>
+    `;
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to,
+      subject,
+      html: formattedBody, // Use the formatted HTML body
+      messageId,
+      inReplyTo,
+      references: references.length > 0 ? references : undefined,
+      headers: {
+        'X-CRM-Reference': parentEmailId || messageId
+      }
+    };
+
+    console.log('[CommService] Attempting to send email with options:', {
+      ...mailOptions,
+      html: formattedBody.substring(0, 100) + '...' // Log only first 100 chars of body
+    });
+
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log(`[CommService] Email sent successfully: ${info.messageId}`);
+
+    // Update the communication record with message ID and references
+    if (parentEmailId) {
+      await query(
+        `UPDATE communication_records 
+         SET email_message_id = $1, 
+             email_in_reply_to = $2, 
+             email_references = $3,
+             is_reply = true
+         WHERE id = $4`,
+        [messageId, inReplyTo, references, parentEmailId]
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[CommService] Error sending email:', error);
+    throw new Error(`Failed to send email: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+};
 
 // --- Helper Function to Save Recording ---
 const saveRecording = async (base64Data: string): Promise<string> => {
@@ -71,7 +184,9 @@ const saveRecording = async (base64Data: string): Promise<string> => {
     const buffer = Buffer.from(base64Data, 'base64');
     const filename = `${uuidv4()}.wav`; // Generate unique filename
     // Ensure the uploads directory exists (relative to dist/server/services)
-    const uploadsDir = path.join(__dirname, '../../../uploads/recordings'); 
+    const uploadsDir = process.env.NODE_ENV === 'production'
+      ? '/tmp/uploads/recordings'
+      : path.join(__dirname, '../../../uploads/recordings'); 
     await fs.mkdir(uploadsDir, { recursive: true }); // Create directory if it doesn't exist
     const filePath = path.join(uploadsDir, filename);
     await fs.writeFile(filePath, buffer);
@@ -99,285 +214,234 @@ const saveRecording = async (base64Data: string): Promise<string> => {
 };
 
 /**
- * Creates a new communication record (call, email, or remark) in the database.
+ * Creates a new communication record (call, meeting, or remark) in the database.
  */
 export const createCommunicationRecord = async (
   recordData: CreateCommunicationPayload, 
   creator: AuthUserInfo
 ): Promise<CommunicationRecord> => {
-  // Log the incoming data immediately
-  console.log('[CommService] createCommunicationRecord received data:', JSON.stringify(recordData)); 
-  console.log('[CommService] Creator:', creator);
-
-  const { 
-    type, notes, 
-    leadId, customerId, duration, callStatus, recordingData, // Call/Remark fields
-    emailSubject, emailBody // Email fields
-  } = recordData;
-
-  // Basic permission check (can be refined per type if needed)
-  if (!creator.permissions?.addCommunications) {
-      throw new Error('Permission denied: Cannot add communication records.');
-  }
-
-  const finalCreatedBy = creator.id; 
-  let recordingUrl: string | null = null;
-  let finalRemarkText: string | null = null;
-  let finalNotes: string | null = notes || null;
-
-  if (type === 'remark') {
-    finalRemarkText = notes || null; // Store remark text in specific column
-    finalNotes = null; // Clear notes field if it was a remark
-  } else if (type === 'call' && recordingData) {
-    // Log the condition check
-    console.log(`[CommService] Condition check: type=${type}, recordingData provided? ${!!recordingData}`);
-    // Log a snippet of recordingData if it exists
-    if (recordingData) {
-        console.log(`[CommService] recordingData starts with: ${recordingData.substring(0, 30)}...`);
-    }
-    try {
-      console.log('[CommService] Attempting to save recording...'); // Add log before trying
-      recordingUrl = await saveRecording(recordingData);
-      console.log(`[CommService] Recording URL set to: ${recordingUrl}`); // Add log on success
-    } catch (error) {
-      console.error("[CommService] CRITICAL: Failed to save recording file:", error);
-      // Re-throw the error to prevent proceeding with DB insert if file save failed
-      throw new Error('Failed to save recording file, aborting communication record creation.'); 
-    }
-  }
-
-  const sqlQuery = `
-    INSERT INTO communication_records (
-      type, notes, made_by, remark_text, -- added remark_text
-      lead_id, customer_id, duration, call_status, recording_url,
-      email_subject, email_body,
-      date
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-      NOW()
-    )
-    RETURNING 
-      id, type, notes, 
-      made_by as "createdBy",
-      lead_id as "leadId", customer_id as "customerId",
-      duration, call_status as "callStatus", recording_url as "recordingUrl",
-      email_subject as "emailSubject", email_body as "emailBody",
-      remark_text as "remarkText", -- return remark_text
-      date
-  `;
-
-  const params: QueryParamValue[] = [
-    type, finalNotes, finalCreatedBy, finalRemarkText, // pass remark_text
-    leadId, customerId, duration, callStatus, recordingUrl,
-    emailSubject, emailBody
-  ];
-
   try {
-    const result = await query(sqlQuery, params);
-    if (result.rows.length === 0) {
-      throw new Error('Failed to create communication record, no record returned.');
+    console.log('[CommService] createCommunicationRecord received data:', JSON.stringify(recordData)); 
+    console.log('[CommService] Creator:', creator);
+
+    const { 
+      type, notes, remark_text,
+      lead_id, customer_id, duration, recording_data
+    } = recordData;
+
+    // Basic permission check
+    if (!creator.permissions?.addCommunications) {
+      throw new Error('Permission denied: Cannot add communication records.');
     }
-    // Map remark_text back to notes if type is remark for consistent return type
-    const record = result.rows[0];
-    if (record.type === 'remark') {
+
+    // Validate required fields for call type
+    if (type === 'call') {
+      if (!lead_id && !customer_id) {
+        throw new Error('Either lead_id or customer_id is required for call type');
+      }
+    }
+
+    const finalCreatedBy = creator.id;
+    const recordingUrl: string | null = null;
+    const finalRemarkText: string | null = type === 'remark' ? (remark_text || notes || null) : null;
+    const finalNotes: string | null = type === 'remark' ? null : (notes || null);
+
+    // Handle recording data if present
+    if (recording_data) {
+      try {
+        const uploadsDir = path.join(process.cwd(), 'uploads', 'recordings');
+        await fs.mkdir(uploadsDir, { recursive: true });
+        
+        const fileName = `${uuidv4()}.webm`;
+        const filePath = path.join(uploadsDir, fileName);
+        
+        // Remove the data URL prefix if present
+        const base64Data = recording_data.replace(/^data:audio\/webm;base64,/, '');
+        await fs.writeFile(filePath, base64Data, 'base64');
+        
+        recordingUrl = `/uploads/recordings/${fileName}`;
+      } catch (error) {
+        console.error('[CommService] Error saving recording:', error);
+        throw new Error('Failed to save recording');
+      }
+    }
+
+    // Build the SQL query
+    const sqlQuery = `
+      INSERT INTO communication_records (
+        type, notes, lead_id, customer_id, duration, recording_url, made_by, date
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      RETURNING *
+    `;
+
+    const params: QueryParamValue[] = [
+      type,
+      finalNotes,
+      lead_id,
+      customer_id,
+      duration,
+      recordingUrl,
+      finalCreatedBy
+    ];
+
+    try {
+      const result = await query(sqlQuery, params);
+      if (result.rows.length === 0) {
+        throw new Error('Failed to create communication record, no record returned.');
+      }
+      
+      const record = result.rows[0];
+      console.log('[CommService] Created record:', record);
+
+      // Map remark_text back to notes if type is remark for consistent return type
+      if (record.type === 'remark') {
         record.notes = record.remarkText;
+      }
+      
+      console.log('[CommService] Successfully created communication record:', record);
+      return record as CommunicationRecord;
+    } catch (dbError) {
+      console.error('[CommService] Database error:', dbError);
+      throw dbError;
     }
-    // Add logging here to confirm successful creation and see the returned record
-    console.log('[CommService] Successfully created communication record:', record);
-    return record as CommunicationRecord; 
   } catch (error) {
-    console.error('Error creating communication record in database service:', error);
-    throw new Error('Failed to create communication record in database'); 
+    console.error('[CommService] Error in createCommunicationRecord:', error);
+    throw error;
   }
 };
 
 /**
- * Fetches unified communication history (calls, emails, remarks) from a single table.
+ * Gets communication history for a specific entity (lead or customer).
  */
-export const getCommunicationHistory = async (user: AuthUserInfo, entityId?: string | number): Promise<CommunicationRecord[]> => {
-  const viewScope = user.permissions?.viewCommunications || 'none';
-  console.log(`[CommService] getCommunicationHistory - User: ${user.id}, Role: ${user.role}, Scope: ${viewScope}, EntityId: ${entityId}`);
-
-  if (viewScope === 'none') {
-    console.log(`[CommService] Permission denied (scope: none) for user ${user.id}.`);
-    return [];
-  }
-
-  let sqlQuery = `
-    SELECT 
-      id, type, 
-      CASE 
-        WHEN type = 'remark' THEN remark_text 
-        ELSE notes 
-      END as notes, 
-      made_by as "createdBy", lead_id as "leadId", customer_id as "customerId",
-      duration, call_status as "callStatus", recording_url as "recordingUrl",
-      email_subject as "emailSubject", email_body as "emailBody",
-      remark_text as "remarkText",
-      date
-    FROM communication_records
-  `;
-  
-  const params: QueryParamValue[] = [];
-  let paramIndex = 1;
-  const whereClauses: string[] = []; // Use an array for multiple conditions
-
-  // Build WHERE clause based on entityId or scope
-  if (entityId) {
-    // Ensure entityId is treated correctly if it can be UUID or INT
-    whereClauses.push(` (lead_id::text = $${paramIndex} OR customer_id::text = $${paramIndex})`);
-    params.push(String(entityId));
-    paramIndex++;
-  } else {
-    // Build WHERE clause based on scope
-    if (user.role === 'developer' || viewScope === 'all') {
-       // No user-specific scope filter needed
-    } else if (user.role === 'admin') {
-       if (viewScope === 'created') {
-          whereClauses.push(` made_by = $${paramIndex++}`);
-          params.push(user.id);
-       } else if (viewScope === 'assignedContacts') {
-          // Fetch history for leads/customers assigned to the admin OR their subordinates
-          whereClauses.push(` 
-            (lead_id IN (
-              SELECT id FROM leads WHERE assigned_to = $${paramIndex} 
-              OR assigned_to IN (SELECT id FROM users WHERE created_by_admin_id = $${paramIndex})
-            ) OR customer_id IN (
-              SELECT id FROM customers WHERE assigned_to = $${paramIndex}
-              OR assigned_to IN (SELECT id FROM users WHERE created_by_admin_id = $${paramIndex})
-            ))
-          `);
-          params.push(user.id);
-          paramIndex++; // Increment only once for the block
-       } else {
-         console.log(`[CommService] Invalid scope '${viewScope}' for admin ${user.id}. Returning empty.`);
-         return []; // Invalid scope
-       }
-    } else if (user.role === 'employee') {
-       if (viewScope === 'created') {
-          whereClauses.push(` made_by = $${paramIndex++}`);
-          params.push(user.id);
-       } else if (viewScope === 'assignedContacts') {
-          // Fetch history for leads/customers assigned to the employee
-          whereClauses.push(` (lead_id IN (SELECT id FROM leads WHERE assigned_to = $${paramIndex}) OR customer_id IN (SELECT id FROM customers WHERE assigned_to = $${paramIndex}))`);
-          params.push(user.id);
-          paramIndex++;
-       } else {
-         console.log(`[CommService] Invalid scope '${viewScope}' for employee ${user.id}. Returning empty.`);
-         return []; // Invalid scope
-       }
-    }
-  }
-
-  // Combine WHERE clauses
-  if (whereClauses.length > 0) {
-      sqlQuery += ` WHERE ${whereClauses.join(' AND ')}`;
-  }
-
-  sqlQuery += ` ORDER BY date DESC`; // Add sorting
-
-  console.log("[CommService] Executing query:", sqlQuery);
-  console.log("[CommService] Query params:", params);
-
+export const getCommunicationHistoryForEntity = async (
+  entityId: string | number,
+  entityType: 'lead' | 'customer',
+  user: AuthUserInfo
+): Promise<CommunicationRecord[]> => {
   try {
-    const result = await query(sqlQuery, params);
-    return result.rows as CommunicationRecord[];
-  } catch (error) {
-    console.error('Error fetching communication history:', error);
-    throw new Error('Failed to fetch communication history');
-  }
-};
+    const viewScope = user.permissions?.viewCommunications || 'none';
+    console.log(`[CommService] getCommunicationHistoryForEntity - User: ${user.id}, Role: ${user.role}, Scope: ${viewScope}`);
 
-// --- New Function for Sent Emails --- 
-export const getSentEmails = async (user: AuthUserInfo): Promise<CommunicationRecord[]> => {
-  const viewScope = user.permissions?.viewCommunications || 'none';
-  console.log(`[CommService] getSentEmails - User: ${user.id}, Role: ${user.role}, Scope: ${viewScope}`);
+    let sqlQuery = `
+      SELECT 
+        id,
+        type,
+        notes,
+        lead_id as "leadId",
+        customer_id as "customerId",
+        duration,
+        recording_url as "recordingUrl",
+        made_by as "createdBy",
+        date,
+        remark_text as "remarkText"
+      FROM communication_records
+      WHERE ${entityType}_id = $1
+    `;
+    
+    const params: QueryParamValue[] = [entityId];
 
-  if (viewScope === 'none') {
-    console.log(`[CommService] Permission denied (scope: none) for user ${user.id}.`);
-    return [];
-  }
-
-  let sqlQuery = `
-    SELECT 
-      cr.id, cr.type, cr.notes, cr.made_by as "createdBy", 
-      cr.lead_id as "leadId", cr.customer_id as "customerId",
-      cr.duration, cr.call_status as "callStatus", cr.recording_url as "recordingUrl",
-      cr.email_subject as "emailSubject", cr.email_body as "emailBody", 
-      cr.remark_text as "remarkText",
-      cr.date,
-      -- Add recipient details based on joins
-      COALESCE(l.name, c.name) as "recipientName", 
-      COALESCE(l.email, c.email) as "recipientEmail" 
-    FROM communication_records cr 
-    LEFT JOIN leads l ON cr.lead_id = l.id
-    LEFT JOIN customers c ON cr.customer_id = c.id
-    WHERE cr.type = 'email'
-  `; 
-  
-  const params: QueryParamValue[] = [];
-  let paramIndex = 1;
-  const whereClauses: string[] = []; 
-
-  // Add scope-based filtering similar to getCommunicationHistory
-  if (user.role === 'developer' || viewScope === 'all') {
-    // No additional user-specific scope filter needed
-  } else if (user.role === 'admin') {
-    if (viewScope === 'created') {
-       whereClauses.push(` cr.made_by = $${paramIndex++}`); // Use alias
-       params.push(user.id);
-    } else if (viewScope === 'assignedContacts') {
-       whereClauses.push(` 
-         (cr.lead_id IN (
-           SELECT id FROM leads WHERE assigned_to = $${paramIndex} 
-           OR assigned_to IN (SELECT id FROM users WHERE created_by_admin_id = $${paramIndex})
-         ) OR cr.customer_id IN (
-           SELECT id FROM customers WHERE assigned_to = $${paramIndex}
-           OR assigned_to IN (SELECT id FROM users WHERE created_by_admin_id = $${paramIndex})
-         ))
-       `);
-       params.push(user.id);
-       paramIndex++;
-    } else {
-      return []; // Invalid scope
+    // Add user filtering based on role and permissions
+    if (user.role !== 'developer') {
+      if (viewScope === 'created') {
+        sqlQuery += ` AND made_by = $2`;
+        params.push(user.id);
+      } else if (viewScope === 'assignedContacts') {
+        sqlQuery += ` AND (
+          lead_id IN (SELECT id FROM leads WHERE assigned_to = $2)
+          OR customer_id IN (SELECT id FROM customers WHERE assigned_to = $2)
+        )`;
+        params.push(user.id);
+      }
     }
-  } else if (user.role === 'employee') {
-    if (viewScope === 'created') {
-       whereClauses.push(` cr.made_by = $${paramIndex++}`); // Use alias
-       params.push(user.id);
-    } else if (viewScope === 'assignedContacts') {
-       whereClauses.push(` (cr.lead_id IN (SELECT id FROM leads WHERE assigned_to = $${paramIndex}) OR cr.customer_id IN (SELECT id FROM customers WHERE assigned_to = $${paramIndex}))`);
-       params.push(user.id);
-       paramIndex++;
-    } else {
-      return []; // Invalid scope
-    }
-  }
 
-  // Combine additional WHERE clauses with the initial type filter
-  if (whereClauses.length > 0) {
-      sqlQuery += ` AND (${whereClauses.join(' AND ')})`; // Add AND
-  }
+    sqlQuery += ` ORDER BY date DESC`;
 
-  sqlQuery += ` ORDER BY cr.date DESC`; // Use alias
+    console.log("[CommService] Executing query:", sqlQuery);
+    console.log("[CommService] Query params:", params);
 
-  console.log("[CommService] Executing query getSentEmails:", sqlQuery);
-  console.log("[CommService] Query params getSentEmails:", params);
-
-  try {
     const result = await query(sqlQuery, params);
-    // Map the result, ensuring the new fields are included
-    return result.rows.map(row => ({
-        ...row,
-        // Ensure boolean fields etc. are correctly typed if needed, 
-        // but direct selection often works.
+    
+    if (!result || !result.rows) {
+      console.error('[CommService] Invalid query result:', result);
+      throw new Error('Database query returned invalid result');
+    }
+    
+    const records = result.rows.map(row => ({
+      ...row,
+      date: row.date ? new Date(row.date) : undefined
     })) as CommunicationRecord[];
+    
+    console.log(`[CommService] Successfully fetched ${records.length} records`);
+    return records;
   } catch (error) {
-    console.error('Error fetching sent emails:', error);
-    throw new Error('Failed to fetch sent emails');
+    console.error('[CommService] Error in getCommunicationHistoryForEntity:', error);
+    throw error;
   }
 };
-// --- End New Function ---
+
+/**
+ * Gets all communication history (respecting user permissions).
+ */
+export const getAllCommunicationHistory = async (user: AuthUserInfo): Promise<CommunicationRecord[]> => {
+  try {
+    const viewScope = user.permissions?.viewCommunications || 'none';
+    console.log(`[CommService] getAllCommunicationHistory - User: ${user.id}, Role: ${user.role}, Scope: ${viewScope}`);
+
+    let sqlQuery = `
+      SELECT 
+        id,
+        type,
+        notes,
+        lead_id as "leadId",
+        customer_id as "customerId",
+        duration,
+        recording_url as "recordingUrl",
+        made_by as "createdBy",
+        date,
+        remark_text as "remarkText"
+      FROM communication_records
+    `;
+    
+    const params: QueryParamValue[] = [];
+
+    // Add user filtering based on role and permissions
+    if (user.role !== 'developer') {
+      if (viewScope === 'created') {
+        sqlQuery += ` WHERE made_by = $1`;
+        params.push(user.id);
+      } else if (viewScope === 'assignedContacts') {
+        sqlQuery += ` WHERE (
+          lead_id IN (SELECT id FROM leads WHERE assigned_to = $1)
+          OR customer_id IN (SELECT id FROM customers WHERE assigned_to = $1)
+        )`;
+        params.push(user.id);
+      }
+    }
+
+    sqlQuery += ` ORDER BY date DESC`;
+
+    console.log("[CommService] Executing query:", sqlQuery);
+    console.log("[CommService] Query params:", params);
+
+    const result = await query(sqlQuery, params);
+    
+    if (!result || !result.rows) {
+      console.error('[CommService] Invalid query result:', result);
+      throw new Error('Database query returned invalid result');
+    }
+    
+    const records = result.rows.map(row => ({
+      ...row,
+      date: row.date ? new Date(row.date) : undefined
+    })) as CommunicationRecord[];
+    
+    console.log(`[CommService] Successfully fetched ${records.length} records`);
+    return records;
+  } catch (error) {
+    console.error('[CommService] Error in getAllCommunicationHistory:', error);
+    throw error;
+  }
+};
 
 /**
  * Gets the file path for a specific recording ID.
@@ -415,6 +479,46 @@ export const getRecordingFilePath = async (recordingId: string, user: AuthUserIn
   }
 };
 
-// Potentially remove addCallRecordingToRecord if it existed and is no longer needed
-
-// Export other necessary functions... 
+/**
+ * Retries sending failed emails
+ */
+export const retryFailedEmails = async (): Promise<void> => {
+  try {
+    // Get failed emails
+    const result = await query(`
+      SELECT id, email_subject, email_body, lead_id, customer_id 
+      FROM communication_records 
+      WHERE type = 'email' AND email_sent = FALSE
+    `);
+    
+    for (const record of result.rows) {
+      try {
+        let recipientEmail = '';
+        
+        if (record.lead_id) {
+          const leadResult = await query('SELECT email FROM leads WHERE id = $1', [record.lead_id]);
+          if (leadResult.rows.length > 0) {
+            recipientEmail = leadResult.rows[0].email;
+          }
+        } else if (record.customer_id) {
+          const customerResult = await query('SELECT email FROM customers WHERE id = $1', [record.customer_id]);
+          if (customerResult.rows.length > 0) {
+            recipientEmail = customerResult.rows[0].email;
+          }
+        }
+        
+        if (recipientEmail) {
+          await sendActualEmail(recipientEmail, record.email_subject, record.email_body);
+          
+          // Update status
+          await query('UPDATE communication_records SET email_sent = TRUE WHERE id = $1', [record.id]);
+          console.log(`[CommService] Successfully retried email ID: ${record.id}`);
+        }
+      } catch (error) {
+        console.error(`[CommService] Failed to retry email ID: ${record.id}`, error);
+      }
+    }
+  } catch (error) {
+    console.error('[CommService] Error in retryFailedEmails:', error);
+  }
+};

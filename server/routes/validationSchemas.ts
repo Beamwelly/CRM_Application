@@ -7,8 +7,8 @@ export const ServiceTypeSchema = z.enum([
     'equity', 
     'insurance', 
     'mutual_funds', 
-    'pms', 
-    'aif', 
+    'PMS', 
+    'AIF', 
     'others'
 ]);
 

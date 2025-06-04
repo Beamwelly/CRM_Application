@@ -66,8 +66,8 @@ export function CommunicationFilters({
               <SelectItem value="equity">Equity</SelectItem>
               <SelectItem value="insurance">Insurance</SelectItem>
               <SelectItem value="mutual_funds">Mutual Funds</SelectItem>
-              <SelectItem value="pms">PMS</SelectItem>
-              <SelectItem value="aif">AIF</SelectItem>
+              <SelectItem value="PMS">PMS</SelectItem>
+              <SelectItem value="AIF">AIF</SelectItem>
               <SelectItem value="others">Others</SelectItem>
             </SelectContent>
           </Select>

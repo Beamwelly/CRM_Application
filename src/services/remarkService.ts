@@ -19,13 +19,13 @@ export const addRemark = async (input: AddRemarkInput): Promise<HistoryEntry> =>
     const payload = {
         type: 'remark',
         notes: input.remarkText,
-        leadId: input.entityType === 'lead' ? input.entityId : undefined,
-        customerId: input.entityType === 'customer' ? input.entityId : undefined,
+        lead_id: input.entityType === 'lead' ? input.entityId : undefined,
+        customer_id: input.entityType === 'customer' ? input.entityId : undefined,
     };
 
     try {
         // Call the unified communications endpoint
-        const newRemark = await api.post('/communications', payload);
+        const newRemark = await api.post('/api/communications', payload);
         // Backend returns the full CommunicationRecord object, cast to HistoryEntry
         return newRemark as HistoryEntry;
     } catch (error) {

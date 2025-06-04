@@ -1,4 +1,5 @@
-import serverless from 'serverless-http';
-import app from './index'; // Changed from './app' to './index'
+import serverlessExpress from '@vendia/serverless-express';
 
-export const handler = serverless(app); 
+import  { app }  from './index'; 
+
+export const handler = serverlessExpress({ app });

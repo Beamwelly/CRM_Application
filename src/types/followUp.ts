@@ -1,4 +1,3 @@
-
 import { FollowUp as BaseFollowUp } from "./index";
 
 // Extend the FollowUp type with additional fields
@@ -24,4 +23,10 @@ declare module '@/types' {
     entityType?: 'lead' | 'customer';
     entityId?: string | number;
   }
+}
+
+export interface FollowUpUpdateData {
+  nextCallDate?: string; // ISO Date string for input
+  notes?: string;
+  isCompleted?: boolean;
 }

@@ -8,7 +8,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCRM } from "@/context/hooks";
-import { ServiceType, User, TrainingLeadStatus, WealthLeadStatus } from "@/types";
+import { ServiceType, User, TrainingLeadStatus, WealthLeadStatus, LeadType } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 
 interface AddLeadDialogProps {
@@ -22,13 +22,15 @@ const baseFormSchema = z.object({
   email: z.string().email('Invalid email format'),
   mobile: z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits'),
   city: z.string().min(1, 'City is required'),
-  serviceTypes: z.array(z.enum(["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"] as const)).min(1, "At least one service type is required"),
+  serviceTypes: z.array(z.enum(["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"] as const)).min(1, "At least one service type is required"),
   leadSource: z.enum(["walk_in", "reference"]), 
   referredBy: z.string().optional(),
   company: z.string().optional(),
   // Keep AUM as string for form input, refine later
   aum: z.string().optional(), 
   assignedTo: z.string().uuid("Invalid user UUID").optional().nullable(),
+  lead_status: z.enum(["hot", "warm", "cold", "not_contacted"] as const),
+  status: z.string(),
 });
 
 // Use the base schema and add superRefine for conditional validation
@@ -54,26 +56,53 @@ const formSchema = baseFormSchema.superRefine((data, ctx) => {
 type FormValues = z.infer<typeof formSchema>;
 
 export function AddLeadDialog({ isOpen, onClose }: AddLeadDialogProps) {
-  const { addLead, users, currentUser } = useCRM();
+  const { addLead, users, currentUser, isLoadingUsers } = useCRM();
   const { toast } = useToast();
   
   // Get available roles based on current user
   const availableUsers = React.useMemo(() => {
-    if (!currentUser) return [];
+    console.log("Calculating available users. Current user:", currentUser);
+    console.log("All users:", users);
+    
+    if (!currentUser || !users) {
+      console.log("No current user or users array is empty");
+      return [];
+    }
+    
+    let filteredUsers: User[] = [];
     
     if (currentUser.role === 'developer' || currentUser.role === 'admin') {
-      return users.filter(u => u.role === 'employee');
+      // Show all users except developers for admin/developer
+      filteredUsers = users.filter(u => u.role !== 'developer');
+    } else if (currentUser.role === 'employee') {
+      // For employees, show only themselves if they have assignLeads permission
+      if (currentUser.permissions?.assignLeads) {
+        filteredUsers = [currentUser];
+      }
     }
     
-    if (currentUser.role === 'employee') {
-      return [currentUser];
-    }
-    
-    return [];
+    console.log("Filtered users:", filteredUsers);
+    return filteredUsers;
   }, [users, currentUser]);
 
+  // Show loading state while users are being fetched
+  if (isLoadingUsers) {
+    return (
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Lead</DialogTitle>
+          </DialogHeader>
+          <div className="p-4 text-center">
+            <p>Loading user data...</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema), // Use reverted schema
+    resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
       email: "",
@@ -84,7 +113,9 @@ export function AddLeadDialog({ isOpen, onClose }: AddLeadDialogProps) {
       referredBy: "",
       company: "",
       aum: "",
-      assignedTo: currentUser?.role === "employee" ? currentUser.id : "",
+      assignedTo: "", // Don't pre-assign to current user
+      lead_status: "not_contacted",
+      status: "new",
     },
   });
   
@@ -104,7 +135,8 @@ export function AddLeadDialog({ isOpen, onClose }: AddLeadDialogProps) {
         company: data.company,
         aum: (numericAum && !isNaN(numericAum)) ? numericAum : undefined,
         assignedTo: data.assignedTo || undefined,
-        status: "new" as TrainingLeadStatus | WealthLeadStatus,
+        status: data.status as TrainingLeadStatus | WealthLeadStatus,
+        lead_status: data.lead_status as LeadType,
     };
 
     addLead(leadPayload);
@@ -214,9 +246,9 @@ export function AddLeadDialog({ isOpen, onClose }: AddLeadDialogProps) {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {["training","wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"].map((type) => (
+                        {["training", "wealth", "equity", "insurance", "mutual_funds", "PMS", "AIF", "others"].map((type) => (
                           <SelectItem key={type} value={type} disabled={field.value?.includes(type as ServiceType)}>
-                            {type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            {type === "PMS" ? "PMS" : type === "AIF" ? "AIF" : type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ')}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -227,7 +259,7 @@ export function AddLeadDialog({ isOpen, onClose }: AddLeadDialogProps) {
                           key={type}
                           className="flex items-center gap-1 bg-secondary px-2 py-1 rounded-md text-sm"
                         >
-                          <span>{type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                          <span>{type === "PMS" ? "PMS" : type === "AIF" ? "AIF" : type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ')}</span>
                           <button
                             type="button"
                             onClick={() => {
@@ -344,6 +376,57 @@ export function AddLeadDialog({ isOpen, onClose }: AddLeadDialogProps) {
                   <FormControl>
                     <Input placeholder="Company name" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
+              name="lead_status"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Type</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="hot">Hot</SelectItem>
+                      <SelectItem value="warm">Warm</SelectItem>
+                      <SelectItem value="cold">Cold</SelectItem>
+                      <SelectItem value="not_contacted">Not Contacted</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
+              name="status"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Status</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="new">New</SelectItem>
+                      <SelectItem value="not_connected">Not Connected</SelectItem>
+                      <SelectItem value="follow_up">Follow Up</SelectItem>
+                      <SelectItem value="ready_to_attend">Ready to Attend</SelectItem>
+                      <SelectItem value="attended">Attended</SelectItem>
+                      <SelectItem value="interested">Interested</SelectItem>
+                      <SelectItem value="consultation_done">Consultation Done</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}

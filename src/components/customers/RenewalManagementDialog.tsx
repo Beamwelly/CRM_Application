@@ -90,13 +90,14 @@ export function RenewalManagementDialog({ isOpen, onClose, customer }: RenewalMa
         nextRenewalDate: data.renewalDate
       };
 
-      addRenewalHistory(customer.id, renewalHistoryEntry);
-
-      // ALSO update the main customer record with the new nextRenewal date
-      updateCustomer({ 
+      // First update the customer's nextRenewal date
+      await updateCustomer({ 
         id: customer.id,
-        nextRenewal: data.renewalDate // Set the new renewal date
-      });
+        nextRenewal: data.renewalDate
+      } as Customer);
+
+      // Then add the renewal history entry
+      await addRenewalHistory(customer.id, renewalHistoryEntry);
 
       toast({
         title: "Renewal updated",

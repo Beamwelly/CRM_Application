@@ -12,7 +12,7 @@ export type Role =
   | 'manager'
   | 'executive';
 
-export type ServiceType = "training" | "wealth" | "equity" | "insurance" | "mutual_funds" | "pms" | "aif" | "others";
+export type ServiceType = "training" | "wealth" | "equity" | "insurance" | "mutual_funds" | "PMS" | "AIF" | "others";
 
 export const ServiceTypeEnum = {
   TRAINING: "training",
@@ -20,8 +20,8 @@ export const ServiceTypeEnum = {
   EQUITY: "equity",
   INSURANCE: "insurance",
   MUTUAL_FUNDS: "mutual_funds",
-  PMS: "pms",
-  AIF: "aif",
+  PMS: "PMS",
+  AIF: "AIF",
   OTHERS: "others"
 } as const;
 
@@ -59,7 +59,7 @@ export interface RenewalHistory {
 // Define a type for Communication History entries
 export interface HistoryEntry {
   id: string;
-  type: 'call' | 'email' | 'meeting' | 'note';
+  type: 'call' | 'email' | 'meeting' | 'note' | 'remark';
   leadId?: string;
   customerId?: string;
   notes?: string;
@@ -68,10 +68,12 @@ export interface HistoryEntry {
   duration?: number;
   callStatus?: 'completed' | 'missed' | 'cancelled';
   recordingData?: string;
+  recordingUrl?: string;
   recipient?: string;
   emailSubject?: string;
   emailBody?: string;
   recipientName?: string;
+  remarkText?: string;
 }
 
 // --- Permission Types ---
@@ -81,34 +83,38 @@ export type UserViewScope = 'all' | 'subordinates' | 'none';
 
 export interface UserPermissions {
   // Leads
-  viewLeads?: DataAccessScope;
-  createLeads?: boolean;
-  editLeads?: DataAccessScope;
-  deleteLeads?: DataAccessScope;
-  assignLeads?: boolean;
+  viewLeads: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  createLeads: boolean;
+  editLeads: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  deleteLeads: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  assignLeads: boolean;
 
   // Customers
-  viewCustomers?: DataAccessScope;
-  createCustomers?: boolean;
-  editCustomers?: DataAccessScope;
-  deleteCustomers?: DataAccessScope;
-  manageRenewals?: boolean; 
+  viewCustomers: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  createCustomers: boolean;
+  editCustomers: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  deleteCustomers: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  assignCustomers: boolean;
+  manageRenewals: boolean;
 
   // Communications
-  viewCommunications?: CommunicationAccessScope;
-  addCommunications?: boolean;
-  playRecordings?: boolean;
-  downloadRecordings?: boolean;
+  viewCommunications: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  addCommunications: boolean;
+  playRecordings: boolean;
+  downloadRecordings: boolean;
 
   // User Management
-  viewUsers?: UserViewScope;          // NEW: Controls viewing users
-  createAdmin?: boolean;             // NEW: Permission to create Admins (Developer only)
-  createEmployee?: boolean;          // NEW: Permission to create Employees (Developer/Admin)
-  editUserPermissions?: boolean;     // NEW: Permission to edit other users' permissions
-  deleteUser?: boolean;              // NEW: Permission to delete users
+  viewUsers: 'all' | 'assigned' | 'created' | 'subordinates' | 'none';
+  createAdmin: boolean;
+  createEmployee: boolean;
+  editUserPermissions: boolean;
+  deleteUser: boolean;
 
   // System Level
-  clearSystemData?: boolean;         // NEW: Permission to clear all leads/customers
+  clearSystemData: boolean;
+
+  // Service Type Access
+  allowedServiceTypes: ServiceType[];
 }
 // --- End Permission Types ---
 
@@ -143,6 +149,8 @@ export interface FollowUp {
   createdBy: string;
 }
 
+export type LeadType = 'hot' | 'warm' | 'cold' | 'not_contacted';
+
 export interface Lead {
   id: string | number;
   name: string;
@@ -155,6 +163,7 @@ export interface Lead {
   createdBy?: string;
   serviceTypes: ServiceType[];
   status: TrainingLeadStatus | WealthLeadStatus;
+  lead_status: LeadType;
   lastWebinarDate?: Date;
   createdAt: Date;
   followUps: FollowUp[];
@@ -216,26 +225,29 @@ export interface AuthResponse {
 // --- Default Permission Constants ---
 export const DEFAULT_DEVELOPER_PERMISSIONS: Required<UserPermissions> = {
   viewLeads: 'all', createLeads: true, editLeads: 'all', deleteLeads: 'all', assignLeads: true,
-  viewCustomers: 'all', createCustomers: true, editCustomers: 'all', deleteCustomers: 'all', manageRenewals: true,
+  viewCustomers: 'all', createCustomers: true, editCustomers: 'all', deleteCustomers: 'all', assignCustomers: true, manageRenewals: true,
   viewCommunications: 'all', addCommunications: true, playRecordings: true, downloadRecordings: true,
   viewUsers: 'all', createAdmin: true, createEmployee: true, editUserPermissions: true, deleteUser: true, 
-  clearSystemData: true, // Grant clear data permission to Developer
+  clearSystemData: true,
+  allowedServiceTypes: ['training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'PMS', 'AIF', 'others']
 };
 
 export const DEFAULT_ADMIN_PERMISSIONS: Required<UserPermissions> = {
   viewLeads: 'created', createLeads: true, editLeads: 'created', deleteLeads: 'created', assignLeads: true, 
-  viewCustomers: 'created', createCustomers: true, editCustomers: 'created', deleteCustomers: 'created', manageRenewals: true,
+  viewCustomers: 'subordinates', createCustomers: true, editCustomers: 'created', deleteCustomers: 'created', assignCustomers: true, manageRenewals: true,
   viewCommunications: 'created', addCommunications: true, playRecordings: true, downloadRecordings: true,
   viewUsers: 'subordinates', createAdmin: false, createEmployee: true, editUserPermissions: true, deleteUser: true, 
-  clearSystemData: false, // Admin cannot clear all data by default
+  clearSystemData: false,
+  allowedServiceTypes: ['training', 'wealth', 'equity', 'insurance', 'mutual_funds', 'PMS', 'AIF', 'others']
 };
 
 export const DEFAULT_EMPLOYEE_PERMISSIONS: UserPermissions = {
   viewLeads: 'assigned', createLeads: true, editLeads: 'assigned', deleteLeads: 'none', assignLeads: false,
-  viewCustomers: 'assigned', createCustomers: false, editCustomers: 'assigned', deleteCustomers: 'none', manageRenewals: false,
-  viewCommunications: 'assignedContacts', addCommunications: true, playRecordings: true, downloadRecordings: false,
+  viewCustomers: 'assigned', createCustomers: true, editCustomers: 'assigned', deleteCustomers: 'none', assignCustomers: false, manageRenewals: false,
+  viewCommunications: 'assigned', addCommunications: true, playRecordings: true, downloadRecordings: false,
   viewUsers: 'none', createAdmin: false, createEmployee: false, editUserPermissions: false, deleteUser: false, 
-  clearSystemData: false, // Employee cannot clear all data
+  clearSystemData: false,
+  allowedServiceTypes: ['training'] // Default to training only for new employees
 };
 // --- End Default Permission Constants ---
 
@@ -253,4 +265,14 @@ export interface CommunicationRecord {
   recording_url?: string;
   email_subject?: string;
   email_body?: string;
+  parent_email_id?: string;
+  is_reply?: boolean;
+  sender_name?: string;
+  recipient_email?: string;
+}
+
+export interface AuthUserInfo {
+  id: string;
+  role: Role;
+  permissions: UserPermissions;
 }

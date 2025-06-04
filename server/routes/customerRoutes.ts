@@ -1,6 +1,6 @@
 import express, { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod'; // Import Zod
-import { getAllCustomers, createCustomer, updateCustomer, deleteCustomer, addRenewalHistoryEntry } from '../services/customerService'; // Import customer service, createCustomer, and updateCustomer
+import { getAllCustomers, createCustomer, updateCustomer, deleteCustomer, addRenewalHistoryEntry, assignCustomer } from '../services/customerService'; // Import customer service, createCustomer, and updateCustomer
 import { protect } from '../middleware/authMiddleware'; // Import protect middleware
 import { ServiceTypeSchema, CustomerStatusSchema, PaymentTypeSchema } from './validationSchemas'; // Assume shared schemas exist
 import { User } from '../@types';
@@ -177,7 +177,7 @@ router.post('/', protect, validateRequest(createCustomerSchema), async (req: Req
       });
     }
 
-    const newCustomer = await createCustomer(req.body, req.user.id);
+    const newCustomer = await createCustomer(req.body, req.user);
     console.log('Customer created successfully:', JSON.stringify(newCustomer, null, 2));
     
     res.status(201).json(newCustomer);
@@ -280,6 +280,59 @@ router.post('/:customerId/renewal-history',
     }
 });
 
+// POST /api/customers/:id/assign
+router.post('/:id/assign', protect, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    const customerId = req.params.id;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    const updatedCustomer = await assignCustomer(customerId, userId, req.user);
+    res.json(updatedCustomer);
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message.includes('Permission denied')) {
+        return res.status(403).json({ message: error.message });
+      }
+      if (error.message.includes('not found')) {
+        return res.status(404).json({ message: error.message });
+      }
+    }
+    next(error);
+  }
+});
+
 // TODO: Add other customer routes (GET /:id)
+
+const developerPermissions = {
+  viewLeads: 'all',
+  createLeads: true,
+  editLeads: 'all',
+  deleteLeads: 'all',
+  assignLeads: true,
+  viewCustomers: 'all',
+  createCustomers: true,
+  editCustomers: 'all',
+  deleteCustomers: 'all',
+  assignCustomers: true,
+  viewUsers: 'all',
+  createAdmin: true,
+  createEmployee: true,
+  deleteUser: true,
+  manageRenewals: true,
+  playRecordings: true,
+  clearSystemData: true,
+  addCommunications: true,
+  downloadRecordings: true,
+  viewCommunications: 'all',
+  editUserPermissions: true
+};
 
 export default router; 

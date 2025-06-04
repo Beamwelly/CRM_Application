@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,18 +16,20 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { FollowUp } from "@/types";
 import { CalendarWithPointerEvents } from "@/components/ui/calendar-with-pointer-events";
+import { Textarea } from "@/components/ui/textarea";
 
 interface FollowUpRescheduleDialogProps {
   isOpen: boolean;
   onClose: () => void;
   followUp: FollowUp;
-  onReschedule: (followUp: FollowUp, newDate: Date) => void;
+  onReschedule: (followUp: FollowUp, newDate: Date, notes: string) => void;
 }
 
 const formSchema = z.object({
   nextCallDate: z.date({
     required_error: "Please select a date for the next follow-up",
   }),
+  notes: z.string().min(1, "Notes are required"),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -45,6 +46,7 @@ export function FollowUpRescheduleDialog({
     resolver: zodResolver(formSchema),
     defaultValues: {
       nextCallDate: followUp ? new Date(followUp.nextCallDate) : new Date(),
+      notes: followUp?.notes || "",
     },
   });
   
@@ -52,12 +54,13 @@ export function FollowUpRescheduleDialog({
     if (isOpen && followUp) {
       form.reset({
         nextCallDate: new Date(followUp.nextCallDate),
+        notes: followUp.notes || "",
       });
     }
   }, [isOpen, followUp, form]);
   
   const handleSubmit = (data: FormValues) => {
-    onReschedule(followUp, data.nextCallDate);
+    onReschedule(followUp, data.nextCallDate, data.notes);
     
     toast({
       title: "Follow-up rescheduled",
@@ -110,6 +113,24 @@ export function FollowUpRescheduleDialog({
                       />
                     </PopoverContent>
                   </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="notes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Notes</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Enter details about the follow-up"
+                      className="min-h-[120px]"
+                      {...field}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

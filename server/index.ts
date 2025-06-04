@@ -3,25 +3,42 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import customerRoutes from './routes/customerRoutes';
+import remarksRouter from './routes/remarks';
 // import whatsappRoutes from './routes/whatsappRoutes'; // Temporarily commented out - ensure this file exists if needed
+import emailRepliesRouter from './routes/emailReplies';
+import communicationsRouter from './routes/communications';
+import { emailFetchService } from './services/emailFetchService';
+import { logger } from './utils/logger';
 
 // Load environment variables
 dotenv.config();
 
-const app = express(); // Keep this
-// const PORT = process.env.PORT || 5000; // PORT is not needed for Lambda
+const app = express();
+const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors()); // Consider more specific CORS options for production
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  credentials: true
+}));
 app.use(express.json());
 
-// Database connection - this will be used by your services/routes
+// Database connection
 export const pool = new Pool({
-  host: process.env.DB_HOST, // Corrected from DATABASE_HOST to match serverless.yml convention
+  host: process.env.DB_HOST,
   port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME, // Corrected from DATABASE_NAME
-  user: process.env.DB_USER,     // Corrected from DATABASE_USER
-  password: process.env.DB_PASSWORD // Corrected from DATABASE_PASSWORD
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD
+});
+
+// Test database connection
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    logger.error('Database connection error:', err);
+  } else {
+    logger.info('Database connected successfully');
+  }
 });
 
 // Basic route to test connection
@@ -42,13 +59,32 @@ app.get('/api/users', async (req, res) => {
 
 // Routes
 app.use('/api/customers', customerRoutes);
+app.use('/api/remarks', remarksRouter);
 // app.use('/api/whatsapp', whatsappRoutes); // Temporarily commented out
+app.use('/api/email-replies', emailRepliesRouter);
+app.use('/api/communications', communicationsRouter);
 
-// Start server - REMOVE for Lambda deployment
-/*
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-*/
+// Initialize email fetching service
+const startEmailFetching = async () => {
+  try {
+    await emailFetchService.fetchNewEmails();
+    setInterval(async () => {
+      await emailFetchService.fetchNewEmails();
+    }, 5 * 60 * 1000);
+    logger.info('Email fetching service started');
+  } catch (error) {
+    logger.error('Failed to start email fetching service:', error);
+  }
+};
 
-export default app; // Export the app instance for serverless-http
+// Start the email fetching service
+startEmailFetching();
+
+// Start server if not in production (AWS Lambda)
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    logger.info(`Server running on port ${PORT}`);
+  });
+}
+
+export { app };

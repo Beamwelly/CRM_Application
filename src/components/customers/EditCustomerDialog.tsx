@@ -91,9 +91,31 @@ export function EditCustomerDialog({ isOpen, onClose, customer }: EditCustomerDi
   const { updateCustomer, users, currentUser } = useCRM();
   const { toast } = useToast();
   
-  const assignableUsers = users.filter(user => 
-    user.role === 'employee' || user.role === 'admin'
-  );
+  // Get available roles based on current user
+  const availableUsers = React.useMemo(() => {
+    console.log("Calculating available users. Current user:", currentUser);
+    console.log("All users:", users);
+    
+    if (!currentUser || !users) {
+      console.log("No current user or users array is empty");
+      return [];
+    }
+    
+    let filteredUsers: User[] = [];
+    
+    if (currentUser.role === 'developer' || currentUser.role === 'admin') {
+      // Show all users except developers for admin/developer
+      filteredUsers = users.filter(u => u.role !== 'developer');
+    } else if (currentUser.role === 'employee') {
+      // For employees, show only themselves if they have assignCustomers permission
+      if (currentUser.permissions?.assignCustomers) {
+        filteredUsers = [currentUser];
+      }
+    }
+    
+    console.log("Filtered users:", filteredUsers);
+    return filteredUsers;
+  }, [users, currentUser]);
 
   const serviceTypes: ServiceType[] = ["training", "wealth", "equity", "insurance", "mutual_funds", "pms", "aif", "others"];
   const paymentTypes: PaymentType[] = ['full_payment', 'partial_payment', 'card', 'bank_transfer', 'cash', 'installment'];
@@ -334,18 +356,21 @@ export function EditCustomerDialog({ isOpen, onClose, customer }: EditCustomerDi
                   name="assignedTo"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Assigned To</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value || null}>
+                      <FormLabel>Assign To</FormLabel>
+                      <Select 
+                        onValueChange={field.onChange} 
+                        value={field.value}
+                        disabled={!['developer', 'admin'].includes(currentUser?.role || '') && !currentUser?.permissions?.assignCustomers}
+                      >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select user" />
+                            <SelectValue placeholder="Select assignee" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="unassigned">Unassigned</SelectItem>
-                          {assignableUsers.map(user => (
+                          {availableUsers.map((user) => (
                             <SelectItem key={user.id} value={user.id}>
-                              {user.name} ({user.role})
+                              {user.name} ({user.position})
                             </SelectItem>
                           ))}
                         </SelectContent>

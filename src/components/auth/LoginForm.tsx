@@ -142,13 +142,15 @@ export function LoginForm() {
               </div>
             )}
             
-            <Button 
-              type="submit" 
-              className="w-full"
-              disabled={isLoading}
-            >
-              {isLoading ? 'Logging in...' : 'Login'}
-            </Button>
+            <div className="space-y-4">
+              <Button 
+                type="submit" 
+                className="w-full"
+                disabled={isLoading}
+              >
+                {isLoading ? 'Logging in...' : 'Login'}
+              </Button>
+            </div>
           </form>
         </Form>
     </>

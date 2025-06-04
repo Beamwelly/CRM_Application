@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useCRM } from '@/context/hooks';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
@@ -8,9 +8,10 @@ import { HistoryEntry } from '@/types';
 interface CommunicationHistoryProps {
   entityId: string | number;
   entityType: 'lead' | 'customer';
+  onRemarkAdded?: () => void;
 }
 
-export function CommunicationHistory({ entityId, entityType }: CommunicationHistoryProps) {
+export function CommunicationHistory({ entityId, entityType, onRemarkAdded }: CommunicationHistoryProps) {
   const { getCommunicationHistoryForEntity, users } = useCRM();
   const [activeTab, setActiveTab] = useState<'all' | 'calls' | 'emails' | 'remarks'>('all');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -18,30 +19,36 @@ export function CommunicationHistory({ entityId, entityType }: CommunicationHist
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   
-  useEffect(() => {
-    const fetchHistory = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const fetchedHistory = await getCommunicationHistoryForEntity(entityId);
-        setHistory(fetchedHistory);
-      } catch (err) {
-        console.error("Failed to fetch communication history:", err);
-        setError(err instanceof Error ? err.message : "Failed to load history");
-        toast({ variant: 'destructive', title: 'Error loading history' });
-        setHistory([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const fetchHistory = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const fetchedHistory = await getCommunicationHistoryForEntity(entityId);
+      setHistory(fetchedHistory);
+    } catch (err) {
+      console.error("Failed to fetch communication history:", err);
+      setError(err instanceof Error ? err.message : "Failed to load history");
+      toast({ variant: 'destructive', title: 'Error loading history' });
+      setHistory([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [entityId, getCommunicationHistoryForEntity, toast]);
 
+  useEffect(() => {
     if (entityId) {
       fetchHistory();
     } else {
       setHistory([]);
       setIsLoading(false);
     }
-  }, [entityId, getCommunicationHistoryForEntity, toast]);
+  }, [entityId, fetchHistory]);
+
+  useEffect(() => {
+    if (onRemarkAdded) {
+      fetchHistory();
+    }
+  }, [onRemarkAdded, fetchHistory]);
   
   const filteredHistory: HistoryEntry[] = history.filter(item => {
     if (activeTab === 'all') return true;

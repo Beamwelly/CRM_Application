@@ -71,7 +71,20 @@ const sanitizeLeadData = (data: Partial<Lead>, existingLead?: Lead): Partial<Lea
 };
 
 // --- Add this helper type ---
-type UpdatableLeadFields = Omit<Lead, 'id' | 'createdAt' | 'followUps' | 'communicationHistory' | 'createdBy' | 'serviceTypes'>;
+interface UpdatableLeadFields {
+  name?: string;
+  email?: string;
+  mobile?: string;
+  city?: string;
+  status?: string;
+  assignedTo?: string;
+  aum?: number;
+  company?: string;
+  leadSource?: string;
+  referredBy?: string;
+  lastWebinarDate?: Date;
+  lead_status?: 'hot' | 'warm' | 'cold' | 'not_contacted';
+}
 // --- End Add ---
 
 /**
@@ -92,7 +105,7 @@ export const getAllLeads = async (user: AuthUserInfo): Promise<Lead[]> => {
                         'id', f.id,
                         'date', f.date,
                         'notes', f.notes,
-                        'nextCallDate', f.next_call_date, /* Ensure correct column name */
+                        'nextCallDate', f.next_call_date,
                         'leadId', f.lead_id,
                         'customerId', f.customer_id,
                         'createdBy', f.created_by
@@ -106,70 +119,47 @@ export const getAllLeads = async (user: AuthUserInfo): Promise<Lead[]> => {
     const params: QueryParamValue[] = [];
     let paramIndex = 1;
 
-    // Determine filtering based on role and permissions
-    const viewScope = user.permissions?.viewLeads || 'none'; // Default to 'none' if undefined
+    // WHERE clause construction based on role
+    const whereClauses: string[] = [];
 
-    if (user.role === 'developer' || viewScope === 'all') {
-        // Developer or user with 'all' permission sees everything - No WHERE clause needed for filtering scope
+    if (user.role === 'developer') {
+        // Developers can see everything - no WHERE clause needed
     } else if (user.role === 'admin') {
-        // Admins filter based on their viewScope
-        if (viewScope === 'created') {
-            // See only leads created by this admin
-            sqlQuery += ` WHERE l.created_by = $${paramIndex++}`;
-            params.push(user.id);
-        } else if (viewScope === 'subordinates') {
-            // See leads created by this admin OR created by employees that this admin created
-            sqlQuery += ` WHERE l.created_by = $${paramIndex} OR l.created_by IN (SELECT id FROM users WHERE created_by_admin_id = $${paramIndex})`;
-            params.push(user.id);
-            paramIndex++; // Increment index after using it twice
-        } else if (viewScope === 'assigned') {
-            // See only leads directly assigned to this admin
-            sqlQuery += ` WHERE l.assigned_to = $${paramIndex++}`;
-            params.push(user.id);
-        } else {
-            // Admin has 'none' or unexpected scope
-            sqlQuery += ` WHERE 1=0`; // Return no results
+        // Admins can see:
+        // 1. Leads they created
+        // 2. Leads assigned to them
+        // 3. Leads created by their employees
+        // 4. Leads assigned to their employees
+        const employeesResult = await query('SELECT id FROM users WHERE created_by_admin_id = $1', [user.id]);
+        const employeeIds = employeesResult.rows.map(row => row.id);
+        const relevantUserIds = [user.id, ...employeeIds];
+        
+        if (relevantUserIds.length > 0) {
+            const placeholders = relevantUserIds.map((_, idx) => `$${paramIndex + idx}`).join(', ');
+            whereClauses.push(`(l.created_by IN (${placeholders}) OR l.assigned_to IN (${placeholders}))`);
+            params.push(...relevantUserIds);
+            paramIndex += relevantUserIds.length;
         }
     } else if (user.role === 'employee') {
-        // Employees can only see leads they created or are assigned to
-        sqlQuery += ` WHERE l.created_by = $${paramIndex} OR l.assigned_to = $${paramIndex}`;
+        // Employees can only see:
+        // 1. Leads they created
+        // 2. Leads assigned to them
+        whereClauses.push(`(l.created_by = $${paramIndex} OR l.assigned_to = $${paramIndex})`);
         params.push(user.id);
+        paramIndex++;
     }
 
-    // Group by the primary key of the main table (leads)
+    // Add WHERE clause if we have conditions
+    if (whereClauses.length > 0) {
+        sqlQuery += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    // Group by and order
     sqlQuery += ` GROUP BY l.id ORDER BY l.created_at DESC`;
 
     try {
         const result = await query(sqlQuery, params);
-        // Define an interface for the row structure from the DB query
-        interface DbLeadRow {
-            id: string;
-            name: string;
-            email: string;
-            mobile: string;
-            city: string;
-            status: string;
-            assignedTo?: string;
-            createdBy?: string;
-            createdAt: string | Date; 
-            aum?: number;
-            company?: string;
-            leadSource?: 'walk_in' | 'reference';
-            referredBy?: string;
-            lastWebinarDate?: string | Date;
-            serviceTypes: string[];
-            followUps: FollowUp[]; // Assuming pg driver parses json_agg into objects
-            startDate?: string | Date;
-        }
-
-        return (result.rows as DbLeadRow[]).map((row: DbLeadRow) => ({
-            ...row, 
-            serviceTypes: row.serviceTypes || [], // Ensure not null
-            followUps: row.followUps || [], // Ensure not null
-            createdAt: new Date(row.createdAt),
-            lastWebinarDate: row.lastWebinarDate ? new Date(row.lastWebinarDate) : undefined,
-            startDate: row.startDate ? new Date(row.startDate) : undefined,
-        }));
+        return result.rows;
     } catch (error) {
         console.error('Error fetching leads:', error);
         throw error;
@@ -190,9 +180,14 @@ export const createLead = async (
     aum, company, leadSource, referredBy, lastWebinarDate 
   } = leadData;
 
-  // Permission check
+  // Permission check - allow if user has createLeads permission
   if (!creator.permissions?.createLeads) {
     throw new Error('Permission denied: Cannot create leads.');
+  }
+
+  // If assigning to someone else, check assignLeads permission
+  if (assignedTo && assignedTo !== creator.id && !creator.permissions?.assignLeads) {
+    throw new Error('Permission denied: Cannot assign leads to other users.');
   }
 
   // Sanitize data based on serviceTypes
@@ -374,8 +369,27 @@ export const updateLead = async (
   }
   // --- End Revert ---
 
-  // Sanitize the filtered update data (no cast needed now)
-  const sanitizedData = sanitizeLeadData(filteredUpdateData, existingLead);
+  // Sanitize and validate input data
+  const sanitizedData: Partial<UpdatableLeadFields> = {
+    name: updateData.name?.trim(),
+    email: updateData.email?.trim().toLowerCase(),
+    mobile: updateData.mobile?.trim(),
+    city: updateData.city?.trim(),
+    status: updateData.status,
+    assignedTo: updateData.assignedTo,
+    aum: updateData.aum,
+    company: updateData.company?.trim(),
+    leadSource: updateData.leadSource,
+    referredBy: updateData.referredBy?.trim(),
+    lastWebinarDate: updateData.lastWebinarDate,
+    lead_status: updateData.lead_status,
+  };
+
+  // Remove undefined values
+  Object.keys(sanitizedData).forEach(key => 
+    sanitizedData[key as keyof typeof sanitizedData] === undefined && 
+    delete sanitizedData[key as keyof typeof sanitizedData]
+  );
 
   // Validate required fields after sanitization
   const finalServiceTypes = updateData.serviceTypes || existingLead?.serviceTypes || [];
@@ -397,7 +411,8 @@ export const updateLead = async (
       sanitizedData.leadSource,
       sanitizedData.referredBy,
       sanitizedData.lastWebinarDate, // $11
-      leadId                         // $12
+      sanitizedData.lead_status,    // $12 - Add lead_status parameter
+      leadId                         // $13 - Move leadId to last position
   ];
 
   const leadUpdateQuery = `
@@ -413,8 +428,9 @@ export const updateLead = async (
       company = COALESCE($8, company),
       lead_source = COALESCE($9, lead_source),
       referred_by = COALESCE($10, referred_by),
-      last_webinar_date = COALESCE($11, last_webinar_date)
-    WHERE id = $12
+      last_webinar_date = COALESCE($11, last_webinar_date),
+      lead_status = COALESCE($12, lead_status)
+    WHERE id = $13
     RETURNING id; -- Return ID to confirm update
   `;
 

@@ -11,6 +11,34 @@ CREATE TYPE user_role AS ENUM (
 -- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Add gmail_connected column to users table if it doesn't exist
+DO $$ 
+BEGIN 
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM information_schema.columns 
+    WHERE table_name = 'users' 
+    AND column_name = 'gmail_connected'
+  ) THEN
+    ALTER TABLE users ADD COLUMN gmail_connected BOOLEAN DEFAULT FALSE;
+  END IF;
+END $$;
+
+-- Create google_tokens table if it doesn't exist
+CREATE TABLE IF NOT EXISTS google_tokens (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Add trigger for updated_at timestamp on google_tokens
+CREATE TRIGGER update_google_tokens_modtime
+    BEFORE UPDATE ON google_tokens
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_column();
+
 -- Users Table
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -25,7 +53,8 @@ CREATE TABLE users (
   logo_url VARCHAR(255), -- Used for admin logos
   position VARCHAR(255),
   google_id VARCHAR(255), -- For Google authentication
-  permissions JSONB
+  permissions JSONB,
+  gmail_connected BOOLEAN DEFAULT FALSE
 );
 
 -- Leads Table
@@ -36,6 +65,7 @@ CREATE TABLE leads (
   mobile VARCHAR(50) NOT NULL,
   city VARCHAR(100) NOT NULL,
   status VARCHAR(50) NOT NULL, -- 'new', 'not_connected', 'follow_up', etc.
+  lead_status VARCHAR(50) DEFAULT 'not_contacted' CHECK (lead_status IN ('hot', 'warm', 'cold', 'not_contacted')), -- Lead type status
   assigned_to UUID REFERENCES users(id),
   created_by UUID REFERENCES users(id),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -132,11 +162,11 @@ CREATE TABLE communication_records (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   made_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  call_status VARCHAR(20),
   recording_data BYTEA,
   email_subject VARCHAR(255),
   email_body TEXT,
-  remarks_text TEXT,
+  remark_text TEXT,
+  email_sent BOOLEAN DEFAULT FALSE, -- Track if email was successfully sent
   CONSTRAINT single_entity_reference CHECK (
     (lead_id IS NULL AND customer_id IS NOT NULL) OR
     (lead_id IS NOT NULL AND customer_id IS NULL)
